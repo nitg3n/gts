@@ -18,7 +18,7 @@ export async function PATCH(
 
   const { id } = await context.params;
   const { status } = statusSchema.parse(await request.json());
-  const review = updateReviewStatus(id, status);
+  const review = await updateReviewStatus(id, status);
 
   if (!review) {
     return Response.json({ message: "리뷰를 찾을 수 없습니다." }, { status: 404 });

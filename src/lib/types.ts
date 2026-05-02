@@ -1,6 +1,10 @@
 export type SchoolLevel = "middle" | "high";
 
+export type StudentStage = "elementary" | "middle";
+
 export type SchoolGender = "coed" | "boys" | "girls";
+
+export type SchoolDataSource = "seed" | "kakao" | "kakao-neis";
 
 export type SchoolMetricKey =
   | "academics"
@@ -29,6 +33,13 @@ export type School = {
   description: string;
   highlights: string[];
   metrics: SchoolMetrics;
+  source?: SchoolDataSource;
+  externalIds?: {
+    kakaoPlaceId?: string;
+    neisSchoolCode?: string;
+    neisOfficeCode?: string;
+  };
+  dataUpdatedAt?: string;
   facts: {
     students: number;
     classes: number;
@@ -42,11 +53,15 @@ export type School = {
 
 export type SurveyAnswer = {
   level: SchoolLevel | "all";
+  studentStage?: StudentStage;
   lat?: number;
   lng?: number;
   distancePreference: "near" | "balanced" | "not-important";
   priorities: SchoolMetricKey[];
   preferredTags: string[];
+  genderPreference?: "single-gender" | "coed" | "any";
+  categoryPreference?: string;
+  rawResponses?: Record<string, string | string[] | number>;
 };
 
 export type Recommendation = {
@@ -63,6 +78,7 @@ export type StoredSurveyResponse = {
   answer: SurveyAnswer;
   createdAt: string;
   recommendations: Recommendation[];
+  source?: SchoolDataSource;
 };
 
 export type ReviewStatus = "pending" | "approved" | "rejected";

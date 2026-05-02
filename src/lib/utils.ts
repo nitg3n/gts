@@ -34,32 +34,6 @@ export function formatDistance(km?: number) {
   return `${km.toFixed(1)}km`;
 }
 
-export function scoreLabel(score: number) {
-  if (score >= 88) {
-    return "매우 높음";
-  }
-  if (score >= 76) {
-    return "높음";
-  }
-  if (score >= 64) {
-    return "보통";
-  }
-  return "확인 필요";
-}
-
-export function metricLabel(metric: string) {
-  const labels: Record<string, string> = {
-    academics: "학업",
-    activities: "활동",
-    environment: "환경",
-    meal: "급식",
-    reviews: "리뷰",
-    stability: "안정성",
-  };
-
-  return labels[metric] ?? metric;
-}
-
 function toRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
 }

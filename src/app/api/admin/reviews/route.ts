@@ -9,6 +9,6 @@ export async function GET(request: Request) {
   }
 
   return Response.json({
-    reviews: listReviews(undefined),
+    reviews: await listReviews(undefined),
   });
 }

@@ -6,10 +6,12 @@ import type {
   SchoolMetricKey,
   SurveyAnswer,
 } from "@/lib/types";
-import { distanceKm, metricLabel } from "@/lib/utils";
+import { getPublicFactItems, getPublicFactValue } from "@/lib/public-facts";
+import { distanceKm } from "@/lib/utils";
 
 export const surveyAnswerSchema = z.object({
   level: z.enum(["middle", "high", "all"]).default("all"),
+  studentStage: z.enum(["elementary", "middle"]).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),
   distancePreference: z
@@ -28,6 +30,11 @@ export const surveyAnswerSchema = z.object({
     )
     .default(["academics", "activities", "environment"]),
   preferredTags: z.array(z.string()).default([]),
+  genderPreference: z.enum(["single-gender", "coed", "any"]).optional(),
+  categoryPreference: z.string().optional(),
+  rawResponses: z
+    .record(z.string(), z.union([z.string(), z.number(), z.array(z.string())]))
+    .optional(),
 });
 
 type WeightMap = Record<SchoolMetricKey | "distance", number>;
@@ -42,37 +49,36 @@ const defaultWeights: WeightMap = {
   stability: 0.06,
 };
 
-export function rankSchools(answer: SurveyAnswer): Recommendation[] {
+export function rankSchools(
+  answer: SurveyAnswer,
+  candidates = filterSchools(answer.level),
+): Recommendation[] {
   const origin =
     typeof answer.lat === "number" && typeof answer.lng === "number"
       ? { lat: answer.lat, lng: answer.lng }
       : SEOUL_CENTER;
   const weights = normalizeWeights(deriveWeights(answer));
 
-  return filterSchools(answer.level)
+  return candidates
+    .filter((school) => answer.level === "all" || school.level === answer.level)
     .map((school) => {
       const km = distanceKm(origin, school);
       const distanceScore = scoreDistance(km, answer.distancePreference);
+      const priorityScore = scorePriorityFit(school, answer, weights);
       const tagScore = scoreTags(school, answer.preferredTags);
+      const preferenceScore = scorePreferenceFit(school, answer);
       const weightedScore =
         distanceScore * weights.distance +
-        school.metrics.academics * weights.academics +
-        school.metrics.activities * weights.activities +
-        school.metrics.environment * weights.environment +
-        school.metrics.meal * weights.meal +
-        school.metrics.reviews * weights.reviews +
-        school.metrics.stability * weights.stability;
+        priorityScore * (1 - weights.distance);
 
       return {
         school,
         rank: 0,
         distanceKm: km,
-        score: clamp(Math.round(weightedScore * 0.9 + tagScore * 0.1)),
-        reasons: buildReasons(school, km, answer, weights),
-        caution:
-          school.metrics.reviews < 80
-            ? "리뷰 데이터가 더 쌓이면 추천 신뢰도가 높아집니다."
-            : undefined,
+        score: clamp(
+          Math.round(weightedScore * 0.74 + tagScore * 0.14 + preferenceScore * 0.12),
+        ),
+        reasons: buildReasons(school, km, answer),
       };
     })
     .sort((a, b) => b.score - a.score)
@@ -126,27 +132,129 @@ function scoreTags(school: School, preferredTags: string[]) {
   }
 
   const matches = preferredTags.filter((tag) => school.tags.includes(tag)).length;
-  return clamp(55 + matches * 18);
+  return clamp(52 + matches * 24);
+}
+
+function scorePreferenceFit(school: School, answer: SurveyAnswer) {
+  let score = 70;
+
+  if (answer.categoryPreference) {
+    score += school.category.includes(answer.categoryPreference) ? 18 : -8;
+  }
+
+  if (answer.genderPreference === "coed") {
+    score += school.gender === "coed" ? 12 : -4;
+  }
+
+  if (answer.genderPreference === "single-gender") {
+    score += school.gender !== "coed" ? 12 : -4;
+  }
+
+  return clamp(score);
+}
+
+function scorePriorityFit(
+  school: School,
+  answer: SurveyAnswer,
+  weights: WeightMap,
+) {
+  const priorities = answer.priorities.length
+    ? answer.priorities
+    : (["academics", "activities", "environment"] satisfies SchoolMetricKey[]);
+  const totalWeight = priorities.reduce(
+    (sum, priority) => sum + weights[priority],
+    0,
+  );
+
+  if (totalWeight <= 0) {
+    return 70;
+  }
+
+  return priorities.reduce(
+    (sum, priority) =>
+      sum + scoreSchoolSignal(school, priority) * (weights[priority] / totalWeight),
+    0,
+  );
+}
+
+function scoreSchoolSignal(school: School, priority: SchoolMetricKey) {
+  if (priority === "activities") {
+    const clubs = getPublicFactValue(school, "clubs");
+    if (clubs) {
+      return clamp(55 + clubs * 1.1);
+    }
+
+    return hasAnyTag(school, ["동아리", "활동", "실습", "프로젝트"]) ? 72 : 62;
+  }
+
+  if (priority === "environment") {
+    const students = getPublicFactValue(school, "students");
+    const classes = getPublicFactValue(school, "classes");
+
+    if (students && classes) {
+      const studentsPerClass = students / classes;
+      return clamp(98 - studentsPerClass);
+    }
+
+    return 68;
+  }
+
+  if (priority === "stability") {
+    const students = getPublicFactValue(school, "students");
+    const teachers = getPublicFactValue(school, "teachers");
+
+    if (students && teachers) {
+      const studentsPerTeacher = students / teachers;
+      return clamp(100 - studentsPerTeacher * 2.2);
+    }
+
+    return 68;
+  }
+
+  if (priority === "academics") {
+    if (school.level === "high" && /과학|외국어|국제|마이스터|특성화/.test(school.category)) {
+      return 76;
+    }
+
+    return school.level === "high" ? 70 : 66;
+  }
+
+  if (priority === "meal") {
+    return hasAnyTag(school, ["급식"]) ? 70 : 60;
+  }
+
+  if (priority === "reviews") {
+    return 60;
+  }
+
+  return 65;
+}
+
+function hasAnyTag(school: School, tags: string[]) {
+  return tags.some((tag) => school.tags.some((schoolTag) => schoolTag.includes(tag)));
 }
 
 function buildReasons(
   school: School,
   km: number,
   answer: SurveyAnswer,
-  weights: WeightMap,
 ) {
-  const topMetrics = (Object.entries(school.metrics) as [
-    SchoolMetricKey,
-    number,
-  ][])
-    .sort((a, b) => b[1] * weights[b[0]] - a[1] * weights[a[0]])
-    .slice(0, 2)
-    .map(([metric]) => metricLabel(metric));
+  const reasons: string[] = [];
 
-  const reasons = [
-    `${topMetrics.join("·")} 지표가 설문 우선순위와 잘 맞습니다.`,
-    school.highlights[0],
-  ];
+  if (
+    answer.categoryPreference &&
+    school.category.includes(answer.categoryPreference)
+  ) {
+    reasons.unshift(`${answer.categoryPreference} 선호와 일치합니다.`);
+  }
+
+  if (answer.genderPreference === "coed" && school.gender === "coed") {
+    reasons.push("공학 선호를 반영했습니다.");
+  }
+
+  if (answer.genderPreference === "single-gender" && school.gender !== "coed") {
+    reasons.push("남고·여고 선호를 반영했습니다.");
+  }
 
   if (answer.distancePreference === "near" && km < 5) {
     reasons.unshift("가까운 통학 조건을 강하게 반영했습니다.");
@@ -157,7 +265,28 @@ function buildReasons(
     reasons.push(`${matchedTag} 관심사와 연결됩니다.`);
   }
 
-  return reasons.slice(0, 3);
+  const publicFacts = getPublicFactItems(school);
+  const clubFact = publicFacts.find((fact) => fact.key === "clubs");
+
+  if (
+    clubFact &&
+    answer.preferredTags.some((tag) => tag.includes("동아리") || tag.includes("활동"))
+  ) {
+    reasons.push(`학교 공시에서 ${clubFact.label} ${clubFact.value}가 확인됩니다.`);
+  } else if (publicFacts.length) {
+    reasons.push(
+      `학교 공시에서 ${publicFacts
+        .slice(0, 2)
+        .map((fact) => `${fact.shortLabel} ${fact.value}`)
+        .join(", ")}가 확인됩니다.`,
+    );
+  }
+
+  if (school.highlights[0]) {
+    reasons.push(school.highlights[0]);
+  }
+
+  return [...new Set(reasons)].slice(0, 3);
 }
 
 function clamp(value: number) {

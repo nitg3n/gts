@@ -47,3 +47,12 @@ http://127.0.0.1:3000
 3. Kakao Local/Maps: 주소 좌표 변환, 지도, 위치 기반 주변 학교 탐색
 4. 커리어넷 OpenAPI: 학교/진로/학과 정보 보강
 5. EDSS: 학교알리미로 부족한 과거 자료나 심화 통계가 필요할 때 확장
+
+## 설문 데이터
+
+`examples/` 디렉터리는 Google Form에서 가져온 원본 예시를 보관하는 곳입니다. 앱에서 실제로 사용하는 정제된 설문 스키마는 `src/data/surveys.ts`에 둡니다.
+
+현재 설문 구성:
+
+- `high-school-selection-v1`: 중학생이 고등학교를 고르는 추천 설문
+- `school-experience-v1`: 리뷰/만족도 수집에 사용할 보조 설문

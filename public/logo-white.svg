@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="logoTitle">
+  <title id="logoTitle">Hakgyoro logo mark white</title>
+  <g fill="#ffffff" transform="translate(76 117) scale(0.826)">
+    <path d="M258 0c5 35 8 38 39 43-31 5-34 9-39 54-5-45-8-49-39-54 31-5 34-8 39-43Z"/>
+    <path d="M295 84 422 36 378 140 370 85Z"/>
+    <path d="M0 337h127c29-107 108-186 218-237-93 46-158 66-206 82-36 11-61 46-88 84Z"/>
+    <path d="M345 100c-32 49-43 82-28 113 13 25 58 61 119 124H288c-35-35-62-58-61-82 2-34 50-85 118-155Z"/>
+  </g>
+</svg>

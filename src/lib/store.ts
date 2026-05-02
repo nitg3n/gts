@@ -1,109 +1,180 @@
+import "server-only";
+
 import { rankSchools, surveyAnswerSchema } from "@/lib/recommendation";
+import { getSchoolById, schools } from "@/lib/schools";
+import { queryPersistentStore } from "@/lib/persistence";
+import { surveys as defaultSurveys } from "@/data/surveys";
+import type { CleanSurvey } from "@/data/surveys";
 import type {
+  School,
   SchoolReview,
   StoredSurveyResponse,
   SurveyAnswer,
 } from "@/lib/types";
 
 type GtsStore = {
+  schools: Map<string, School>;
+  surveys: CleanSurvey[];
+  activeSurveyId: string;
   surveyResponses: Map<string, StoredSurveyResponse>;
   reviews: SchoolReview[];
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __gtsStore: GtsStore | undefined;
+  var __gtsPersistentDefaultsReady: Promise<void> | undefined;
 }
-
-const initialReviews: SchoolReview[] = [
-  {
-    id: "review-1",
-    schoolId: "eunkwang-girls-high",
-    authorId: "seed",
-    authorName: "졸업생 2024",
-    relation: "graduate",
-    enrolledYear: 2021,
-    graduatedYear: 2024,
-    ratings: {
-      atmosphere: 5,
-      exams: 4,
-      meals: 5,
-      activities: 4,
-      facilities: 4,
-    },
-    body: "상담이 꾸준하고 분위기가 차분한 편이라 진로 고민을 말하기 좋았습니다.",
-    status: "approved",
-    createdAt: new Date("2026-04-08T09:00:00.000Z").toISOString(),
-  },
-  {
-    id: "review-2",
-    schoolId: "seoul-robot-high",
-    authorId: "seed",
-    authorName: "재학생 2026",
-    relation: "current",
-    enrolledYear: 2024,
-    ratings: {
-      atmosphere: 4,
-      exams: 3,
-      meals: 4,
-      activities: 5,
-      facilities: 5,
-    },
-    body: "전공 실습 시간이 많고 프로젝트를 실제로 만들어보는 기회가 많습니다.",
-    status: "approved",
-    createdAt: new Date("2026-04-18T11:00:00.000Z").toISOString(),
-  },
-  {
-    id: "review-3",
-    schoolId: "daechi-middle",
-    authorId: "seed",
-    authorName: "재학생 2025",
-    relation: "current",
-    enrolledYear: 2025,
-    ratings: {
-      atmosphere: 4,
-      exams: 4,
-      meals: 3,
-      activities: 3,
-      facilities: 4,
-    },
-    body: "학업 분위기가 잡혀 있고 통학이 편합니다. 동아리는 더 다양해지면 좋겠습니다.",
-    status: "pending",
-    createdAt: new Date("2026-04-28T12:30:00.000Z").toISOString(),
-  },
-];
 
 export function getStore() {
   if (!globalThis.__gtsStore) {
     globalThis.__gtsStore = {
+      schools: new Map(schools.map((school) => [school.id, school])),
+      surveys: cloneSurveys(defaultSurveys),
+      activeSurveyId: defaultSurveys[0].id,
       surveyResponses: new Map(),
-      reviews: [...initialReviews],
+      reviews: [],
     };
+  }
+
+  if (!globalThis.__gtsStore.schools) {
+    globalThis.__gtsStore.schools = new Map(
+      schools.map((school) => [school.id, school]),
+    );
+  }
+
+  if (!globalThis.__gtsStore.surveys) {
+    globalThis.__gtsStore.surveys = cloneSurveys(defaultSurveys);
+    globalThis.__gtsStore.activeSurveyId = defaultSurveys[0].id;
+  }
+
+  if (
+    !globalThis.__gtsStore.surveys.some(
+      (survey) => survey.id === defaultSurveys[0].id,
+    )
+  ) {
+    globalThis.__gtsStore.surveys = cloneSurveys(defaultSurveys);
+    globalThis.__gtsStore.activeSurveyId = defaultSurveys[0].id;
   }
 
   return globalThis.__gtsStore;
 }
 
-export function saveSurveyAnswer(rawAnswer: unknown) {
+export function cacheSchools(nextSchools: School[]) {
+  const store = getStore();
+
+  nextSchools.forEach((school) => {
+    store.schools.set(school.id, school);
+  });
+}
+
+export function getCachedSchool(id: string) {
+  return getStore().schools.get(id) ?? getSchoolById(id);
+}
+
+export async function listSurveyDefinitions() {
+  const persistentSurveys = await readPersistentSurveys();
+
+  if (persistentSurveys) {
+    return cloneSurveys(persistentSurveys);
+  }
+
+  return cloneSurveys(getStore().surveys);
+}
+
+export async function getActiveSurvey() {
+  const persistentSurvey = await readPersistentActiveSurvey();
+
+  if (persistentSurvey) {
+    return cloneSurvey(persistentSurvey);
+  }
+
+  const store = getStore();
+  return cloneSurvey(
+    store.surveys.find((survey) => survey.id === store.activeSurveyId) ??
+      store.surveys[0],
+  );
+}
+
+export async function saveSurveyDefinition(
+  survey: CleanSurvey,
+  activeSurveyId?: string,
+) {
+  const activeId = await getActiveSurveyId();
+  const store = getStore();
+  const cleanSurvey = normalizeSurveyDefinition(survey);
+  const existingIndex = store.surveys.findIndex((item) => item.id === cleanSurvey.id);
+
+  if (existingIndex >= 0) {
+    store.surveys[existingIndex] = cleanSurvey;
+  } else {
+    store.surveys.push(cleanSurvey);
+  }
+
+  if (activeSurveyId || store.activeSurveyId === survey.id) {
+    store.activeSurveyId = activeSurveyId ?? cleanSurvey.id;
+  }
+
+  await writePersistentSurveyDefinition(
+    cleanSurvey,
+    activeSurveyId ?? (activeId === cleanSurvey.id ? cleanSurvey.id : undefined),
+  );
+
+  return cloneSurvey(cleanSurvey);
+}
+
+export async function getActiveSurveyId() {
+  const persistentId = await readPersistentActiveSurveyId();
+
+  if (persistentId) {
+    return persistentId;
+  }
+
+  return getStore().activeSurveyId;
+}
+
+export async function saveSurveyAnswer(
+  rawAnswer: unknown,
+  candidates?: School[],
+  source?: StoredSurveyResponse["source"],
+) {
   const answer = surveyAnswerSchema.parse(rawAnswer) as SurveyAnswer;
+  const schoolCandidates =
+    candidates && candidates.length > 0 ? candidates : undefined;
+
+  if (schoolCandidates) {
+    cacheSchools(schoolCandidates);
+  }
+
   const id = createId("response");
   const stored: StoredSurveyResponse = {
     id,
-    answer,
+    answer: sanitizeSurveyAnswer(answer),
     createdAt: new Date().toISOString(),
-    recommendations: rankSchools(answer),
+    recommendations: rankSchools(answer, schoolCandidates),
+    source: source ?? (schoolCandidates ? "kakao" : "seed"),
   };
 
   getStore().surveyResponses.set(id, stored);
+  await writePersistentSurveyResponse(stored);
 
   return stored;
 }
 
-export function getSurveyResult(id: string) {
+export async function getSurveyResult(id: string) {
   const stored = getStore().surveyResponses.get(id);
 
   if (stored) {
     return stored;
+  }
+
+  const persistent = await readPersistentSurveyResponse(id);
+
+  if (persistent) {
+    cacheSchools(
+      persistent.recommendations.map((recommendation) => recommendation.school),
+    );
+    getStore().surveyResponses.set(id, persistent);
+    return persistent;
   }
 
   const fallback = surveyAnswerSchema.parse({
@@ -121,8 +192,21 @@ export function getSurveyResult(id: string) {
   };
 }
 
-export function listReviews(schoolId?: string, status?: SchoolReview["status"]) {
+export async function listReviews(
+  schoolId?: string,
+  status?: SchoolReview["status"],
+) {
+  const persistentReviews = await readPersistentReviews(schoolId, status);
+
+  if (persistentReviews) {
+    return persistentReviews.filter(isUserReview);
+  }
+
   return getStore().reviews.filter((review) => {
+    if (!isUserReview(review)) {
+      return false;
+    }
+
     if (schoolId && review.schoolId !== schoolId) {
       return false;
     }
@@ -135,7 +219,7 @@ export function listReviews(schoolId?: string, status?: SchoolReview["status"]) 
   });
 }
 
-export function createReview(
+export async function createReview(
   review: Omit<SchoolReview, "id" | "createdAt" | "status">,
 ) {
   const newReview: SchoolReview = {
@@ -146,12 +230,24 @@ export function createReview(
   };
 
   getStore().reviews.unshift(newReview);
+  await writePersistentReview(newReview);
 
   return newReview;
 }
 
-export function updateReviewStatus(id: string, status: SchoolReview["status"]) {
+export async function updateReviewStatus(id: string, status: SchoolReview["status"]) {
+  const persistentReview = await updatePersistentReviewStatus(id, status);
   const review = getStore().reviews.find((item) => item.id === id);
+
+  if (persistentReview) {
+    if (review) {
+      Object.assign(review, persistentReview);
+    } else {
+      getStore().reviews.unshift(persistentReview);
+    }
+
+    return persistentReview;
+  }
 
   if (!review) {
     return undefined;
@@ -161,10 +257,343 @@ export function updateReviewStatus(id: string, status: SchoolReview["status"]) {
   return review;
 }
 
+async function readPersistentSurveys() {
+  return readPersistent(async () => {
+    const result = await queryPersistentStore<{ payload: CleanSurvey }>(
+      `
+        select payload
+        from public.gts_surveys
+        order by is_active desc, updated_at desc
+      `,
+    );
+
+    return result?.rows.map((row) => row.payload);
+  });
+}
+
+async function readPersistentActiveSurvey() {
+  return readPersistent(async () => {
+    const result = await queryPersistentStore<{ payload: CleanSurvey }>(
+      `
+        select payload
+        from public.gts_surveys
+        where is_active = true
+        order by updated_at desc
+        limit 1
+      `,
+    );
+
+    return result?.rows[0]?.payload;
+  });
+}
+
+async function readPersistentActiveSurveyId() {
+  return readPersistent(async () => {
+    const result = await queryPersistentStore<{ id: string }>(
+      `
+        select id
+        from public.gts_surveys
+        where is_active = true
+        order by updated_at desc
+        limit 1
+      `,
+    );
+
+    return result?.rows[0]?.id;
+  });
+}
+
+async function writePersistentSurveyDefinition(
+  survey: CleanSurvey,
+  activeSurveyId?: string,
+) {
+  await writePersistent(async () => {
+    if (activeSurveyId) {
+      await queryPersistentStore(
+        "update public.gts_surveys set is_active = false where is_active = true",
+      );
+    }
+
+    await queryPersistentStore(
+      `
+        insert into public.gts_surveys (id, payload, is_active, updated_at)
+        values ($1, $2::jsonb, $3, now())
+        on conflict (id) do update set
+          payload = excluded.payload,
+          is_active = excluded.is_active,
+          updated_at = now()
+      `,
+      [survey.id, JSON.stringify(survey), activeSurveyId === survey.id],
+    );
+  });
+}
+
+async function writePersistentSurveyResponse(response: StoredSurveyResponse) {
+  await writePersistent(async () => {
+    await queryPersistentStore(
+      `
+        insert into public.gts_survey_responses
+          (id, answer, recommendations, source, created_at)
+        values ($1, $2::jsonb, $3::jsonb, $4, $5)
+        on conflict (id) do update set
+          answer = excluded.answer,
+          recommendations = excluded.recommendations,
+          source = excluded.source
+      `,
+      [
+        response.id,
+        JSON.stringify(response.answer),
+        JSON.stringify(response.recommendations),
+        response.source,
+        response.createdAt,
+      ],
+    );
+  });
+}
+
+async function readPersistentSurveyResponse(id: string) {
+  return readPersistent(async () => {
+    const result = await queryPersistentStore<{
+      id: string;
+      answer: SurveyAnswer;
+      recommendations: StoredSurveyResponse["recommendations"];
+      source: StoredSurveyResponse["source"] | null;
+      created_at: Date | string;
+    }>(
+      `
+        select id, answer, recommendations, source, created_at
+        from public.gts_survey_responses
+        where id = $1
+        limit 1
+      `,
+      [id],
+    );
+    const row = result?.rows[0];
+
+    if (!row) {
+      return undefined;
+    }
+
+    return {
+      id: row.id,
+      answer: surveyAnswerSchema.parse(row.answer) as SurveyAnswer,
+      createdAt: toIsoString(row.created_at),
+      recommendations: row.recommendations,
+      source: row.source ?? undefined,
+    } satisfies StoredSurveyResponse;
+  });
+}
+
+async function readPersistentReviews(
+  schoolId?: string,
+  status?: SchoolReview["status"],
+) {
+  return readPersistent(async () => {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (schoolId) {
+      params.push(schoolId);
+      clauses.push(`school_id = $${params.length}`);
+    }
+
+    if (status) {
+      params.push(status);
+      clauses.push(`status = $${params.length}`);
+    }
+
+    const where = clauses.length ? `where ${clauses.join(" and ")}` : "";
+    const result = await queryPersistentStore<{ payload: SchoolReview }>(
+      `
+        select payload
+        from public.gts_reviews
+        ${where}
+        order by created_at desc
+      `,
+      params,
+    );
+
+    return result?.rows.map((row) => row.payload);
+  });
+}
+
+async function writePersistentReview(review: SchoolReview) {
+  await writePersistent(async () => {
+    await queryPersistentStore(
+      `
+        insert into public.gts_reviews
+          (id, school_id, status, payload, created_at, updated_at)
+        values ($1, $2, $3, $4::jsonb, $5, now())
+        on conflict (id) do update set
+          school_id = excluded.school_id,
+          status = excluded.status,
+          payload = excluded.payload,
+          updated_at = now()
+      `,
+      [
+        review.id,
+        review.schoolId,
+        review.status,
+        JSON.stringify(review),
+        review.createdAt,
+      ],
+    );
+  });
+}
+
+async function updatePersistentReviewStatus(
+  id: string,
+  status: SchoolReview["status"],
+) {
+  return readPersistent(async () => {
+    const result = await queryPersistentStore<{ payload: SchoolReview }>(
+      `
+        update public.gts_reviews
+        set
+          status = $2,
+          payload = jsonb_set(payload, '{status}', to_jsonb($2::text), true),
+          updated_at = now()
+        where id = $1
+        returning payload
+      `,
+      [id, status],
+    );
+
+    return result?.rows[0]?.payload;
+  });
+}
+
+async function readPersistent<T>(operation: () => Promise<T | undefined>) {
+  try {
+    await ensurePersistentDefaults();
+    return await operation();
+  } catch (error) {
+    logPersistentStoreError(error);
+    return undefined;
+  }
+}
+
+async function writePersistent(operation: () => Promise<void>) {
+  try {
+    await ensurePersistentDefaults();
+    await operation();
+  } catch (error) {
+    logPersistentStoreError(error);
+    // Keep local development usable even if the database is unavailable.
+  }
+}
+
+async function ensurePersistentDefaults() {
+  if (!globalThis.__gtsPersistentDefaultsReady) {
+    globalThis.__gtsPersistentDefaultsReady = seedPersistentDefaults();
+  }
+
+  return globalThis.__gtsPersistentDefaultsReady.catch((error) => {
+    globalThis.__gtsPersistentDefaultsReady = undefined;
+    throw error;
+  });
+}
+
+async function seedPersistentDefaults() {
+  const surveyCount = await queryPersistentStore<{ count: string }>(
+    "select count(*) from public.gts_surveys",
+  );
+
+  if (!surveyCount) {
+    return;
+  }
+
+  if (Number(surveyCount.rows[0]?.count ?? 0) === 0) {
+    await Promise.all(
+      defaultSurveys.map((survey, index) =>
+        queryPersistentStore(
+          `
+            insert into public.gts_surveys (id, payload, is_active)
+            values ($1, $2::jsonb, $3)
+            on conflict (id) do nothing
+          `,
+          [survey.id, JSON.stringify(survey), index === 0],
+        ),
+      ),
+    );
+  }
+
+  const activeSurveyCount = await queryPersistentStore<{ count: string }>(
+    "select count(*) from public.gts_surveys where is_active = true",
+  );
+
+  if (Number(activeSurveyCount?.rows[0]?.count ?? 0) === 0) {
+    await queryPersistentStore(
+      "update public.gts_surveys set is_active = true where id = $1",
+      [defaultSurveys[0].id],
+    );
+  }
+}
+
+function isUserReview(review: SchoolReview) {
+  return review.authorId !== "seed";
+}
+
 function createId(prefix: string) {
   if (globalThis.crypto?.randomUUID) {
     return `${prefix}-${globalThis.crypto.randomUUID()}`;
   }
 
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeSurveyDefinition(survey: CleanSurvey): CleanSurvey {
+  return {
+    ...survey,
+    id: survey.id.trim() || createId("survey"),
+    title: survey.title.trim() || "새 설문",
+    description: survey.description.trim(),
+    audience: survey.audience.trim() || "중학생",
+    defaultTargetLevel: survey.defaultTargetLevel,
+    sourceExampleFiles: survey.sourceExampleFiles ?? [],
+    questions: survey.questions.map((question, index) => ({
+      ...question,
+      id: question.id.trim() || `question-${index + 1}`,
+      title: question.title.trim() || "새 질문",
+      choices: question.choices?.map((choice, choiceIndex) => ({
+        ...choice,
+        id: choice.id.trim() || `${question.id}-choice-${choiceIndex + 1}`,
+        label: choice.label.trim() || "선택지",
+        value: choice.value.trim() || choice.label.trim() || `choice-${choiceIndex + 1}`,
+      })),
+    })),
+  };
+}
+
+function cloneSurvey(survey: CleanSurvey): CleanSurvey {
+  return JSON.parse(JSON.stringify(survey)) as CleanSurvey;
+}
+
+function cloneSurveys(surveys: CleanSurvey[]) {
+  return surveys.map(cloneSurvey);
+}
+
+function sanitizeSurveyAnswer(answer: SurveyAnswer) {
+  const cleanAnswer = { ...answer };
+  delete cleanAnswer.lat;
+  delete cleanAnswer.lng;
+
+  return JSON.parse(JSON.stringify(cleanAnswer)) as SurveyAnswer;
+}
+
+function toIsoString(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function logPersistentStoreError(error: unknown) {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  const detail =
+    error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : String(error);
+
+  console.warn(`[gts:persistence] ${detail}`);
 }

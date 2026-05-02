@@ -58,6 +58,13 @@ export async function requireRequestUser(request: Request) {
   const user = await getRequestUser(request);
 
   if (!user) {
+    if (isLocalDevelopmentRequest(request)) {
+      return {
+        id: "local-dev-user",
+        email: "local-dev@gotoschool.local",
+      };
+    }
+
     return Response.json(
       { message: "로그인이 필요합니다." },
       { status: 401 },
@@ -73,6 +80,13 @@ export async function requireAdminUser(request: Request) {
   const email = user?.email?.toLowerCase();
 
   if (!user || !email || !adminEmails.includes(email)) {
+    if (isLocalDevelopmentRequest(request)) {
+      return {
+        id: "local-admin",
+        email: "local-admin@gotoschool.local",
+      };
+    }
+
     return Response.json(
       { message: "관리자 권한이 필요합니다." },
       { status: 403 },
@@ -80,4 +94,13 @@ export async function requireAdminUser(request: Request) {
   }
 
   return user;
+}
+
+function isLocalDevelopmentRequest(request: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+
+  const host = new URL(request.url).hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }

@@ -1,7 +1,5 @@
 import { z } from "zod";
-import { getSchoolById } from "@/lib/schools";
-import { createReview, listReviews } from "@/lib/store";
-import { requireRequestUser } from "@/lib/supabase";
+import { createReview, getCachedSchool, listReviews } from "@/lib/store";
 
 const reviewSchema = z.object({
   schoolId: z.string(),
@@ -25,20 +23,14 @@ export async function GET(request: Request) {
   const status = url.searchParams.get("status") === "pending" ? "pending" : "approved";
 
   return Response.json({
-    reviews: listReviews(schoolId, status),
+    reviews: await listReviews(schoolId, status),
   });
 }
 
 export async function POST(request: Request) {
-  const user = await requireRequestUser(request);
-
-  if (user instanceof Response) {
-    return user;
-  }
-
   try {
     const body = reviewSchema.parse(await request.json());
-    const school = getSchoolById(body.schoolId);
+    const school = getCachedSchool(body.schoolId);
 
     if (!school) {
       return Response.json(
@@ -47,9 +39,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const review = createReview({
+    const review = await createReview({
       ...body,
-      authorId: user.id,
+      authorId: "public-reviewer",
     });
 
     return Response.json({ review }, { status: 201 });

@@ -1,0 +1,248 @@
+{
+  "title": "고등학교 진학에 대한 설문 조사",
+  "description": "고등학교 진학 시 중요하게 여겼던 포인트에 대해서 선택해주세요!",
+  "source_url": "https://docs.google.com/forms/d/e/1FAIpQLSe6jH4s8yMkxCVN7BBYXP3wd50kbILPtrQJzhBygP8Sj_5eFQ/viewform?usp=publish-editor",
+  "questions": [
+    {
+      "number": 1,
+      "item_id": 1757764572,
+      "entry_id": 754118021,
+      "type": "multiple_choice",
+      "required": true,
+      "question": "본인의 학년은?",
+      "description": "본인의 학년은?",
+      "options": [
+        "1학년",
+        "2학년",
+        "3학년"
+      ],
+      "scale_min_label": "",
+      "scale_max_label": ""
+    },
+    {
+      "number": 2,
+      "item_id": 1692029939,
+      "entry_id": 1978748705,
+      "type": "multiple_choice",
+      "required": true,
+      "question": "현재 다니는 학교의 성별 유형은?",
+      "description": "현재 다니는 학교의 성별 유형은?",
+      "options": [
+        "남고 또는 여고",
+        "공학(남녀 분반)",
+        "공학(남녀 합반)",
+        "상관없다"
+      ],
+      "scale_min_label": "",
+      "scale_max_label": ""
+    },
+    {
+      "number": 3,
+      "item_id": 854878909,
+      "entry_id": 1648566172,
+      "type": "multiple_choice",
+      "required": true,
+      "question": "현재 재학 중인 학교의 계열은 무엇인가요?",
+      "description": "현재 재학 중인 학교의 계열은 무엇인가요?",
+      "options": [
+        "일반고",
+        "특성화고",
+        "자율형 사립고",
+        "외국어고",
+        "과학고",
+        "예술고",
+        "체육고",
+        "마이스터고",
+        "아직 모르겠다",
+        "기타"
+      ],
+      "scale_min_label": "",
+      "scale_max_label": ""
+    },
+    {
+      "number": 4,
+      "item_id": 1879212799,
+      "entry_id": "",
+      "type": "section_header",
+      "required": false,
+      "question": "고등학교를 선택할 당시 영향을 주었던 요소에 대한 정도 설문",
+      "description": "고등학교를 선택할 당시 영향을 주었던 요소에 대한 정도 설문",
+      "options": []
+    },
+    {
+      "number": 5,
+      "item_id": 1333763532,
+      "entry_id": 1036101400,
+      "type": "linear_scale",
+      "required": true,
+      "question": "면학 분위기(공부하는 분위기)",
+      "description": "면학 분위기(공부하는 분위기)",
+      "options": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "scale_min_label": "매우 중요하지 않다",
+      "scale_max_label": "매우 중요하다"
+    },
+    {
+      "number": 6,
+      "item_id": 499394876,
+      "entry_id": 541540254,
+      "type": "linear_scale",
+      "required": true,
+      "question": "학교 생활의 즐거움(동아리 활동이나 축제 등)",
+      "description": "학교 생활의 즐거움(동아리 활동이나 축제 등)",
+      "options": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "scale_min_label": "매우 중요하지 않다",
+      "scale_max_label": "매우 중요하다"
+    },
+    {
+      "number": 7,
+      "item_id": 1766435464,
+      "entry_id": 850163966,
+      "type": "linear_scale",
+      "required": true,
+      "question": "통학 거리",
+      "description": "통학 거리",
+      "options": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "scale_min_label": "매우 중요하지 않다",
+      "scale_max_label": "매우 중요하다"
+    },
+    {
+      "number": 8,
+      "item_id": 1606409426,
+      "entry_id": 434095799,
+      "type": "linear_scale",
+      "required": true,
+      "question": "친한 친구들의 진학 여부",
+      "description": "친한 친구들의 진학 여부",
+      "options": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "scale_min_label": "매우 중요하지 않다",
+      "scale_max_label": "매우 중요하다"
+    },
+    {
+      "number": 9,
+      "item_id": 1965371469,
+      "entry_id": 761250471,
+      "type": "linear_scale",
+      "required": true,
+      "question": "학교에 대한 주변 인식 (입시 결과, 학교 평판)",
+      "description": "학교에 대한 주변 인식 (입시 결과, 학교 평판)",
+      "options": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "scale_min_label": "매우 중요하지 않다",
+      "scale_max_label": "매우 중요하다"
+    },
+    {
+      "number": 10,
+      "item_id": 1847761957,
+      "entry_id": 1002988768,
+      "type": "linear_scale",
+      "required": true,
+      "question": "학교 시설 및 급식의 질",
+      "description": "학교 시설 및 급식의 질",
+      "options": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "scale_min_label": "매우 중요하지 않다",
+      "scale_max_label": "매우 중요하다"
+    },
+    {
+      "number": 11,
+      "item_id": 1347909900,
+      "entry_id": 1025357186,
+      "type": "checkboxes",
+      "required": true,
+      "question": "실제 입학 후 가장 만족하는 것을 모두 고르면?",
+      "description": "실제 입학 후 가장 만족하는 것을 모두 고르면?",
+      "options": [
+        "급식의 질과 학교 시설",
+        "공부하기 좋은 학습 분위기",
+        "좋은 친구들과 반 분위기",
+        "다양한 교내 활동(동아리, 대회 참여 기회 등)",
+        "학교 축제, 체육대회 등 다양한 행사",
+        "기타"
+      ],
+      "scale_min_label": "",
+      "scale_max_label": ""
+    },
+    {
+      "number": 12,
+      "item_id": 1088485018,
+      "entry_id": 766408627,
+      "type": "multiple_choice",
+      "required": true,
+      "question": "고등학교 선택 시 본인의 의견은 얼마나 반영되었나요?",
+      "description": "고등학교 선택 시 본인의 의견은 얼마나 반영되었나요?",
+      "options": [
+        "80~100% (내가 가고 싶은 곳을 직접 결정했다)",
+        "60~80% (나의 의견이 중심이고 부모님과 상의했다)",
+        "40~60% (부모님과 충분한 합의를 통해 결정했다)",
+        "20~40% (부모님이나 선생님의 권유가 더 컸다)",
+        "0~20%(부모님이나 선생님이 가라는 곳으로 왔다)"
+      ],
+      "scale_min_label": "",
+      "scale_max_label": ""
+    },
+    {
+      "number": 13,
+      "item_id": 857255797,
+      "entry_id": 1013509685,
+      "type": "multiple_choice",
+      "required": true,
+      "question": "후배들에게 우리 학교를 추천하고 싶나요?",
+      "description": "후배들에게 우리 학교를 추천하고 싶나요?",
+      "options": [
+        "예",
+        "아니오"
+      ],
+      "scale_min_label": "",
+      "scale_max_label": ""
+    },
+    {
+      "number": 14,
+      "item_id": 1779227863,
+      "entry_id": 1882314996,
+      "type": "multiple_choice",
+      "required": true,
+      "question": "다시 고등학교를 선택할 기회가 있다면 현재의 학교를 선택할 것인가요?",
+      "description": "다시 고등학교를 선택할 기회가 있다면 현재의 학교를 선택할 것인가요?",
+      "options": [
+        "예",
+        "아니오"
+      ],
+      "scale_min_label": "",
+      "scale_max_label": ""
+    }
+  ]
+}

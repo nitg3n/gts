@@ -6,5 +6,5 @@ export async function GET(
 ) {
   const { responseId } = await context.params;
 
-  return Response.json(getSurveyResult(responseId));
+  return Response.json(await getSurveyResult(responseId));
 }

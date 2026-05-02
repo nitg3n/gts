@@ -1,123 +1,323 @@
 "use client";
 
-import { useMemo } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRightLeft } from "lucide-react";
-import { MetricBar } from "@/components/MetricBar";
+import {
+  ArrowRight,
+  ArrowRightLeft,
+  CheckCircle2,
+  ExternalLink,
+  MapPin,
+  Scale,
+} from "lucide-react";
+import {
+  formatPublicFactValue,
+  getPublicFactItems,
+  getPublicFactValue,
+  publicFactDefinitions,
+} from "@/lib/public-facts";
 import { schools } from "@/lib/schools";
-import type { SchoolMetricKey } from "@/lib/types";
-
-const metrics: SchoolMetricKey[] = [
-  "academics",
-  "activities",
-  "environment",
-  "meal",
-  "reviews",
-  "stability",
-];
+import type { School } from "@/lib/types";
 
 export function CompareView({ ids }: { ids?: string }) {
-  const selected = useMemo(() => {
-    const requested = ids?.split(",").filter(Boolean) ?? [];
-    const picked = requested.length
-      ? requested
-          .map((id) => schools.find((school) => school.id === id))
-          .filter(Boolean)
-      : schools.slice(0, 3);
+  const requested = useMemo(() => ids?.split(",").filter(Boolean) ?? [], [ids]);
+  const seededSelection = useMemo(() => {
+    if (!requested.length) {
+      return [];
+    }
 
-    return picked.slice(0, 4);
-  }, [ids]);
+    return requested
+      .map((id) => schools.find((school) => school.id === id))
+      .filter((school): school is School => Boolean(school))
+      .slice(0, 4);
+  }, [requested]);
+  const [loadedSelected, setLoadedSelected] = useState<School[]>(seededSelection);
+  const selected = loadedSelected.length ? loadedSelected : seededSelection;
+  const visiblePublicFacts = publicFactDefinitions.filter((definition) =>
+    selected.some((school) => getPublicFactValue(school, definition.key)),
+  );
+
+  useEffect(() => {
+    if (requested.length === 0) {
+      return;
+    }
+
+    Promise.all(
+      requested.slice(0, 4).map(async (id) => {
+        const seeded = schools.find((school) => school.id === id);
+
+        if (seeded) {
+          return seeded;
+        }
+
+        const response = await fetch(`/api/schools/${id}`);
+        if (!response.ok) {
+          return undefined;
+        }
+
+        const data = (await response.json()) as { school?: School };
+        return data.school;
+      }),
+    ).then((items) => {
+      const nextSchools = items.filter((school): school is School =>
+        Boolean(school),
+      );
+      setLoadedSelected(nextSchools);
+    });
+  }, [requested]);
+
+  if (requested.length === 0) {
+    return <EmptyCompareState />;
+  }
+
+  if (selected.length === 0) {
+    return <LoadingCompareState />;
+  }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <section className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <p className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.2em] text-teal-700">
-            <ArrowRightLeft className="h-4 w-4" aria-hidden />
-            Compare
-          </p>
-          <h1 className="mt-3 text-4xl font-black tracking-tight text-zinc-950 sm:text-5xl">
-            학교 비교
-          </h1>
+    <div className="apple-page">
+      <section className="apple-section">
+        <div className="apple-shell grid gap-8 py-12 lg:grid-cols-[minmax(0,1fr)_340px] lg:py-16">
+          <div>
+            <p className="apple-eyebrow flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4" aria-hidden />
+              Compare
+            </p>
+            <h1 className="apple-title mt-3 max-w-3xl text-5xl leading-[1.04] sm:text-6xl">
+              후보 학교를 같은 기준으로 비교합니다.
+            </h1>
+          </div>
+          <div className="apple-dark-panel p-6">
+            <Scale className="h-6 w-6 text-[#a7cdb1]" aria-hidden />
+            <div className="mt-5 text-5xl font-black">{selected.length}</div>
+            <p className="mt-2 text-sm font-bold leading-6 text-white/62">
+              비교 중인 학교
+            </p>
+          </div>
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-7xl overflow-x-auto px-4 py-8 sm:px-6 lg:px-8">
-        <div className="min-w-[880px] overflow-hidden rounded-lg border border-zinc-200 bg-white">
-          <div
-            className="grid border-b border-zinc-200 bg-zinc-100"
-            style={{ gridTemplateColumns: `180px repeat(${selected.length}, 1fr)` }}
-          >
-            <div className="p-4 text-sm font-black text-zinc-500">항목</div>
-            {selected.map((school) => (
-              <div key={school.id} className="p-4">
-                <div className="font-black text-zinc-950">{school.name}</div>
-                <div className="mt-1 text-sm font-semibold text-zinc-500">
-                  {school.category} · {school.district}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <CompareRow label="규모">
-            {selected.map((school) => (
-              <Cell key={school.id}>
-                {school.facts.students}명 · {school.facts.classes}학급
-              </Cell>
-            ))}
-          </CompareRow>
-          <CompareRow label="강점">
-            {selected.map((school) => (
-              <Cell key={school.id}>{school.highlights.join(" · ")}</Cell>
-            ))}
-          </CompareRow>
-          {metrics.map((metric) => (
-            <CompareRow key={metric} label={metric}>
-              {selected.map((school) => (
-                <div key={school.id} className="p-4">
-                  <MetricBar metric={metric} value={school.metrics[metric]} />
-                </div>
-              ))}
-            </CompareRow>
+      <section className="apple-shell py-10 lg:py-12">
+        <div className="grid gap-5 lg:grid-cols-3">
+          {selected.map((school) => (
+            <SchoolSnapshot key={school.id} school={school} />
           ))}
-          <CompareRow label="상세">
-            {selected.map((school) => (
-              <div key={school.id} className="p-4">
-                <Link
-                  href={`/schools/${school.id}`}
-                  className="inline-flex h-10 items-center rounded-md bg-zinc-950 px-4 text-sm font-black text-white transition hover:bg-teal-700"
-                >
-                  보기
-                </Link>
-              </div>
-            ))}
-          </CompareRow>
+        </div>
+
+        <div className="apple-panel mt-8 overflow-hidden">
+          <div className="border-b border-[var(--line)] bg-white/50 px-5 py-4">
+            <h2 className="text-xl font-black text-[#1d1d1f]">핵심 비교</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <div className="min-w-[920px]">
+              <FactRow label="학교 유형">
+                {selected.map((school) => (
+                  <FactCell key={school.id}>{school.category}</FactCell>
+                ))}
+              </FactRow>
+              <FactRow label="지역">
+                {selected.map((school) => (
+                  <FactCell key={school.id}>{school.district}</FactCell>
+                ))}
+              </FactRow>
+              <FactRow label="성별 유형">
+                {selected.map((school) => (
+                  <FactCell key={school.id}>{genderLabel(school.gender)}</FactCell>
+                ))}
+              </FactRow>
+              <FactRow label="통학 메모">
+                {selected.map((school) => (
+                  <FactCell key={school.id}>{school.facts.commuteNote}</FactCell>
+                ))}
+              </FactRow>
+              {visiblePublicFacts.map((definition) => (
+                <FactRow key={definition.key} label={definition.label}>
+                  {selected.map((school) => (
+                    <FactCell key={school.id}>
+                      {formatPublicFactValue(school, definition.key)}
+                    </FactCell>
+                  ))}
+                </FactRow>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <aside className="mt-8 grid gap-4 lg:grid-cols-3">
+          {selected.map((school) => (
+            <DecisionNote key={school.id} school={school} />
+          ))}
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function EmptyCompareState() {
+  return (
+    <div className="apple-page">
+      <section className="apple-section">
+        <div className="apple-shell grid min-h-[520px] place-items-center py-16 text-center">
+          <div>
+            <p className="apple-eyebrow inline-flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4" aria-hidden />
+              Compare
+            </p>
+            <h1 className="apple-title mt-4 text-5xl leading-tight sm:text-6xl">
+              비교할 학교가 아직 없습니다.
+            </h1>
+            <p className="apple-copy mx-auto mt-5 max-w-2xl text-lg">
+              설문을 마치면 상위 후보가 자동으로 연결됩니다.
+            </p>
+            <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
+              <Link
+                href="/survey"
+                className="apple-button-primary h-12 gap-2 px-5 text-sm"
+              >
+                설문으로 후보 만들기
+                <ArrowRight className="h-4 w-4" aria-hidden />
+              </Link>
+              <Link href="/" className="apple-button-secondary h-12 px-5 text-sm">
+                주변 학교 탐색
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
     </div>
   );
 }
 
-function CompareRow({
+function LoadingCompareState() {
+  return (
+    <div className="apple-page grid min-h-[60vh] place-items-center px-4">
+      <div className="text-center">
+        <p className="apple-eyebrow">Compare</p>
+        <h1 className="apple-title mt-3 text-3xl">학교 정보를 불러오는 중</h1>
+      </div>
+    </div>
+  );
+}
+
+function SchoolSnapshot({ school }: { school: School }) {
+  const publicFacts = getPublicFactItems(school).slice(0, 3);
+
+  return (
+    <article className="apple-card p-5">
+      <div>
+        <p className="text-xs font-black text-[var(--brand-primary)]">
+          {school.level === "middle" ? "Middle" : "High"}
+        </p>
+        <h2 className="mt-2 text-2xl font-black tracking-tight text-[#1d1d1f]">
+          {school.name}
+        </h2>
+        <p className="mt-1 text-sm font-bold text-[#6e6e73]">
+          {school.category} · {school.district}
+        </p>
+      </div>
+
+      <div className="mt-5 divide-y divide-[#f1f1f4] rounded-2xl border border-[#e8e8ed] bg-white/60">
+        {publicFacts.map((fact) => (
+          <MiniFact key={fact.key} label={fact.shortLabel} value={fact.value} />
+        ))}
+        <MiniFact label="위치" value={school.district} icon={<MapPin />} />
+      </div>
+
+      <Link
+        href={`/schools/${school.id}`}
+        className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-[#1d1d1f] px-4 text-sm font-black text-white transition hover:bg-[var(--brand-primary)]"
+      >
+        상세 보기
+        <ExternalLink className="h-4 w-4" aria-hidden />
+      </Link>
+    </article>
+  );
+}
+
+function MiniFact({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+      <div className="flex items-center gap-2 font-bold text-[#6e6e73]">
+        {icon ? (
+          <span className="text-[var(--brand-primary)] [&>svg]:h-3.5 [&>svg]:w-3.5">
+            {icon}
+          </span>
+        ) : null}
+        {label}
+      </div>
+      <div className="font-black text-[#1d1d1f]">{value}</div>
+    </div>
+  );
+}
+
+function FactRow({
   label,
   children,
 }: {
   label: string;
-  children: React.ReactNode;
+  children: ReactNode[];
 }) {
-  const childCount = Array.isArray(children) ? children.length : 1;
-
   return (
     <div
-      className="grid border-b border-zinc-100 last:border-b-0"
-      style={{ gridTemplateColumns: `180px repeat(${childCount}, 1fr)` }}
+      className="grid border-b border-[#f1f1f4] last:border-b-0"
+      style={{ gridTemplateColumns: `180px repeat(${children.length}, 1fr)` }}
     >
-      <div className="bg-zinc-50 p-4 text-sm font-black text-zinc-700">{label}</div>
+      <div className="bg-white/50 p-4 text-sm font-black text-[#6e6e73]">
+        {label}
+      </div>
       {children}
     </div>
   );
 }
 
-function Cell({ children }: { children: React.ReactNode }) {
-  return <div className="p-4 text-sm font-semibold leading-6 text-zinc-700">{children}</div>;
+function FactCell({ children }: { children: ReactNode }) {
+  return (
+    <div className="p-4 text-sm font-semibold leading-6 text-[#1d1d1f]">
+      {children}
+    </div>
+  );
+}
+
+function DecisionNote({ school }: { school: School }) {
+  return (
+    <article className="apple-card p-5">
+      <h3 className="text-lg font-black text-[#1d1d1f]">{school.name}</h3>
+      <div className="mt-4 space-y-3">
+        {school.highlights.slice(0, 3).map((highlight) => (
+          <div
+            key={highlight}
+            className="flex gap-2 text-sm font-semibold leading-6 text-[#6e6e73]"
+          >
+            <CheckCircle2
+              className="mt-1 h-4 w-4 flex-none text-[#34c759]"
+              aria-hidden
+            />
+            {highlight}
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-sm font-semibold leading-6 text-[#6e6e73]">
+        {school.description}
+      </p>
+    </article>
+  );
+}
+
+function genderLabel(value: School["gender"]) {
+  if (value === "boys") {
+    return "남학교";
+  }
+  if (value === "girls") {
+    return "여학교";
+  }
+  return "공학";
 }
