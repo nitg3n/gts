@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   ArrowRightLeft,
@@ -10,6 +11,8 @@ import {
   ExternalLink,
   MapPin,
   Scale,
+  Trash2,
+  X,
 } from "lucide-react";
 import {
   formatPublicFactValue,
@@ -17,62 +20,76 @@ import {
   getPublicFactValue,
   publicFactDefinitions,
 } from "@/lib/public-facts";
+import {
+  clearCompareSchools,
+  getStoredCompareSchools,
+  mergeCompareSchools,
+  removeSchoolFromCompare,
+  saveStoredCompareSchools,
+} from "@/lib/compare-list";
 import { schools } from "@/lib/schools";
 import type { School } from "@/lib/types";
 
 export function CompareView({ ids }: { ids?: string }) {
-  const requested = useMemo(() => ids?.split(",").filter(Boolean) ?? [], [ids]);
-  const seededSelection = useMemo(() => {
-    if (!requested.length) {
-      return [];
-    }
-
-    return requested
-      .map((id) => schools.find((school) => school.id === id))
-      .filter((school): school is School => Boolean(school))
-      .slice(0, 4);
-  }, [requested]);
-  const [loadedSelected, setLoadedSelected] = useState<School[]>(seededSelection);
-  const selected = loadedSelected.length ? loadedSelected : seededSelection;
+  const router = useRouter();
+  const requested = useMemo(() => parseCompareIds(ids), [ids]);
+  const requestedKey = requested.join(",");
+  const [selected, setSelected] = useState<School[]>([]);
+  const [isReady, setIsReady] = useState(false);
   const visiblePublicFacts = publicFactDefinitions.filter((definition) =>
     selected.some((school) => getPublicFactValue(school, definition.key)),
   );
 
   useEffect(() => {
-    if (requested.length === 0) {
-      return;
+    let canceled = false;
+
+    async function loadSelection() {
+      setIsReady(false);
+      const storedSchools = getStoredCompareSchools();
+
+      if (!requested.length) {
+        if (!canceled) {
+          setSelected(storedSchools);
+          setIsReady(true);
+        }
+        return;
+      }
+
+      const requestedSchools = await loadSchoolsByIds(requested, storedSchools);
+      const nextSchools = saveStoredCompareSchools(
+        mergeCompareSchools(storedSchools, requestedSchools),
+      );
+
+      if (!canceled) {
+        setSelected(nextSchools);
+        setIsReady(true);
+        router.replace("/compare", { scroll: false });
+      }
     }
 
-    Promise.all(
-      requested.slice(0, 4).map(async (id) => {
-        const seeded = schools.find((school) => school.id === id);
+    void loadSelection();
 
-        if (seeded) {
-          return seeded;
-        }
+    return () => {
+      canceled = true;
+    };
+  }, [requested, requestedKey, router]);
 
-        const response = await fetch(`/api/schools/${id}`);
-        if (!response.ok) {
-          return undefined;
-        }
+  function removeSelectedSchool(id: string) {
+    const nextSchools = removeSchoolFromCompare(id);
+    setSelected(nextSchools);
+  }
 
-        const data = (await response.json()) as { school?: School };
-        return data.school;
-      }),
-    ).then((items) => {
-      const nextSchools = items.filter((school): school is School =>
-        Boolean(school),
-      );
-      setLoadedSelected(nextSchools);
-    });
-  }, [requested]);
+  function clearSelectedSchools() {
+    clearCompareSchools();
+    setSelected([]);
+  }
 
-  if (requested.length === 0) {
-    return <EmptyCompareState />;
+  if (!isReady) {
+    return <LoadingCompareState />;
   }
 
   if (selected.length === 0) {
-    return <LoadingCompareState />;
+    return <EmptyCompareState />;
   }
 
   return (
@@ -94,6 +111,14 @@ export function CompareView({ ids }: { ids?: string }) {
             <p className="mt-2 text-sm font-bold leading-6 text-white/62">
               비교 중인 학교
             </p>
+            <button
+              type="button"
+              onClick={clearSelectedSchools}
+              className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-white/10 px-4 text-sm font-black text-white transition hover:bg-white/18"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+              비우기
+            </button>
           </div>
         </div>
       </section>
@@ -101,7 +126,11 @@ export function CompareView({ ids }: { ids?: string }) {
       <section className="apple-shell py-10 lg:py-12">
         <div className="grid gap-5 lg:grid-cols-3">
           {selected.map((school) => (
-            <SchoolSnapshot key={school.id} school={school} />
+            <SchoolSnapshot
+              key={school.id}
+              school={school}
+              onRemove={() => removeSelectedSchool(school.id)}
+            />
           ))}
         </div>
 
@@ -154,6 +183,46 @@ export function CompareView({ ids }: { ids?: string }) {
   );
 }
 
+async function loadSchoolsByIds(ids: string[], storedSchools: School[]) {
+  const storedById = new Map(storedSchools.map((school) => [school.id, school]));
+
+  const items = await Promise.all(
+    ids.map(async (id) => {
+      const stored = storedById.get(id);
+
+      if (stored) {
+        return stored;
+      }
+
+      const seeded = schools.find((school) => school.id === id);
+
+      if (seeded) {
+        return seeded;
+      }
+
+      try {
+        const response = await fetch(`/api/schools/${id}`);
+        if (!response.ok) {
+          return undefined;
+        }
+
+        const data = (await response.json()) as { school?: School };
+        return data.school;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+
+  return items.filter((school): school is School => Boolean(school));
+}
+
+function parseCompareIds(ids?: string) {
+  return [
+    ...new Set(ids?.split(",").map((id) => id.trim()).filter(Boolean) ?? []),
+  ];
+}
+
 function EmptyCompareState() {
   return (
     <div className="apple-page">
@@ -168,7 +237,7 @@ function EmptyCompareState() {
               비교할 학교가 아직 없습니다.
             </h1>
             <p className="apple-copy mx-auto mt-5 max-w-2xl text-lg">
-              설문을 마치면 상위 후보가 자동으로 연결됩니다.
+              학교 카드나 상세 화면에서 비교할 후보를 담아보세요.
             </p>
             <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
               <Link
@@ -200,21 +269,37 @@ function LoadingCompareState() {
   );
 }
 
-function SchoolSnapshot({ school }: { school: School }) {
+function SchoolSnapshot({
+  school,
+  onRemove,
+}: {
+  school: School;
+  onRemove: () => void;
+}) {
   const publicFacts = getPublicFactItems(school).slice(0, 3);
 
   return (
     <article className="apple-card p-5">
-      <div>
-        <p className="text-xs font-black text-[var(--brand-primary)]">
-          {school.level === "middle" ? "Middle" : "High"}
-        </p>
-        <h2 className="mt-2 text-2xl font-black tracking-tight text-[#1d1d1f]">
-          {school.name}
-        </h2>
-        <p className="mt-1 text-sm font-bold text-[#6e6e73]">
-          {school.category} · {school.district}
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black text-[var(--brand-primary)]">
+            {school.level === "middle" ? "Middle" : "High"}
+          </p>
+          <h2 className="mt-2 text-2xl font-black tracking-tight text-[#1d1d1f]">
+            {school.name}
+          </h2>
+          <p className="mt-1 text-sm font-bold text-[#6e6e73]">
+            {school.category} · {school.district}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full bg-white/72 text-[#86868b] ring-1 ring-[var(--line)] transition hover:bg-[#ff3b30] hover:text-white"
+          aria-label={`${school.name} 비교에서 제거`}
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
       </div>
 
       <div className="mt-5 divide-y divide-[#f1f1f4] rounded-2xl border border-[#e8e8ed] bg-white/60">

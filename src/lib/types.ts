@@ -68,6 +68,9 @@ export type Recommendation = {
   school: School;
   rank: number;
   score: number;
+  matchType?: "nearby" | "balanced" | "expanded";
+  semanticScore?: number;
+  distanceScore?: number;
   distanceKm?: number;
   reasons: string[];
   caution?: string;
@@ -101,12 +104,4 @@ export type SchoolReview = {
   body: string;
   status: ReviewStatus;
   createdAt: string;
-};
-
-export type PublicRuntimeConfig = {
-  kakaoJsKey: string;
-  supabaseProjectUrl: string;
-  supabasePublishableKey: string;
-  hasKakaoMap: boolean;
-  hasSupabase: boolean;
 };

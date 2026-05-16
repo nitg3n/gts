@@ -67,6 +67,6 @@ export const reviews = pgTable("reviews", {
   graduatedYear: integer("graduated_year"),
   ratings: jsonb("ratings").notNull(),
   body: text("body").notNull(),
-  status: reviewStatus("status").notNull().default("pending"),
+  status: reviewStatus("status").notNull().default("approved"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });

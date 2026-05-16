@@ -1,17 +1,31 @@
 import { createClient } from "@supabase/supabase-js";
-import { getAdminEmails, hasSupabaseServerConfig } from "@/lib/env";
+import {
+  getAdminEmails,
+  getSupabaseServerConfig,
+  hasSupabaseServerConfig,
+} from "@/lib/env";
 
-export function createBrowserSupabaseClient(config: {
-  supabaseProjectUrl: string;
-  supabasePublishableKey: string;
-}) {
-  if (!config.supabaseProjectUrl || !config.supabasePublishableKey) {
+const browserSupabaseProjectUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_PROJECT_URL ??
+  process.env.NEXT_PUBLIC_SUPABASE_URL ??
+  "";
+const browserSupabasePublishableKey =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+  "";
+
+export function hasBrowserSupabaseConfig() {
+  return Boolean(browserSupabaseProjectUrl && browserSupabasePublishableKey);
+}
+
+export function createBrowserSupabaseClient() {
+  if (!hasBrowserSupabaseConfig()) {
     return undefined;
   }
 
   return createClient(
-    config.supabaseProjectUrl,
-    config.supabasePublishableKey,
+    browserSupabaseProjectUrl,
+    browserSupabasePublishableKey,
   );
 }
 
@@ -19,10 +33,15 @@ export function createServerSupabaseClient() {
   if (!hasSupabaseServerConfig()) {
     return undefined;
   }
+  const config = getSupabaseServerConfig();
+
+  if (!config) {
+    return undefined;
+  }
 
   return createClient(
-    process.env.SUPABASE_PROJECT_URL!,
-    process.env.SUPABASE_PUBLISHABLE_KEY!,
+    config.projectUrl,
+    config.publishableKey,
     {
       auth: {
         persistSession: false,

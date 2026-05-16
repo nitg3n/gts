@@ -70,11 +70,16 @@ async function createSchema(pool: Pool) {
     create table if not exists public.gts_reviews (
       id text primary key,
       school_id text not null,
-      status text not null check (status in ('pending', 'approved', 'rejected')),
+      status text not null default 'approved' check (status in ('pending', 'approved', 'rejected')),
       payload jsonb not null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+  `);
+
+  await pool.query(`
+    alter table public.gts_reviews
+      alter column status set default 'approved';
   `);
 
   await pool.query(`

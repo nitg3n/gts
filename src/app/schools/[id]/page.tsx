@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRightLeft, ExternalLink, MapPin, Phone } from "lucide-react";
+import { ExternalLink, MapPin, Phone } from "lucide-react";
+import { CompareButton } from "@/components/CompareButton";
 import { KakaoMap } from "@/components/KakaoMap";
 import { ReviewsPanel } from "@/components/ReviewsPanel";
 import { getPublicFactItems } from "@/lib/public-facts";
-import { getCachedSchool, listReviews } from "@/lib/store";
+import { getSchoolByRouteId, listReviews } from "@/lib/store";
 
 export default async function SchoolPage({
   params,
@@ -12,13 +12,13 @@ export default async function SchoolPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const school = getCachedSchool(id);
+  const school = await getSchoolByRouteId(id);
 
   if (!school) {
     notFound();
   }
 
-  const reviews = await listReviews(school.id, "approved");
+  const reviews = await listReviews(school.id);
   const publicFacts = getPublicFactItems(school);
 
   return (
@@ -43,13 +43,9 @@ export default async function SchoolPage({
               ))}
             </div>
             <div className="mt-7 flex flex-wrap gap-3">
-              <Link
-                href={`/compare?ids=${school.id}`}
-                className="apple-button-primary h-11 gap-2 px-4 text-sm"
-              >
+              <CompareButton school={school} navigateOnAdd variant="primary">
                 비교에 올리기
-                <ArrowRightLeft className="h-4 w-4" aria-hidden />
-              </Link>
+              </CompareButton>
               {school.website ? (
                 <a
                   href={school.website}
@@ -69,28 +65,52 @@ export default async function SchoolPage({
 
       <section className="apple-shell grid gap-6 py-10 lg:grid-cols-[minmax(0,1fr)_360px] lg:py-12">
         <main className="space-y-8">
+          {publicFacts.length ? (
+            <section className="apple-panel p-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-[var(--brand-primary)]">
+                    School Profile
+                  </p>
+                  <h2 className="mt-1 text-2xl font-black tracking-tight text-[#1d1d1f]">
+                    학교 지표
+                  </h2>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {publicFacts.map((fact) => (
+                  <div
+                    key={fact.key}
+                    className="rounded-lg border border-[#e8e8ed] bg-white/70 p-4"
+                  >
+                    <div className="text-xs font-black text-[#86868b]">
+                      {fact.label}
+                    </div>
+                    <div className="mt-2 text-2xl font-black tracking-tight text-[#1d1d1f]">
+                      {fact.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           <ReviewsPanel schoolId={school.id} initialReviews={reviews} />
         </main>
 
         <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
-          {publicFacts.length ? (
-            <div className="apple-panel p-5">
-              <h2 className="text-lg font-black text-[#1d1d1f]">학교 공시 정보</h2>
-              <div className="mt-4 divide-y divide-[#f1f1f4] rounded-2xl border border-[#e8e8ed] bg-white/60">
-                {publicFacts.map((fact) => (
-                  <div
-                    key={fact.key}
-                    className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-                  >
-                    <span className="font-bold text-[#6e6e73]">
-                      {fact.shortLabel}
-                    </span>
-                    <span className="font-black text-[#1d1d1f]">{fact.value}</span>
-                  </div>
-                ))}
-              </div>
+          <div className="apple-panel p-5">
+            <h2 className="text-lg font-black text-[#1d1d1f]">학교 요약</h2>
+            <div className="mt-4 divide-y divide-[#f1f1f4] rounded-2xl border border-[#e8e8ed] bg-white/60">
+              <SummaryRow label="유형" value={school.category} />
+              <SummaryRow label="성별" value={genderLabel(school.gender)} />
+              {school.founded ? (
+                <SummaryRow label="개교" value={`${school.founded}년`} />
+              ) : null}
+              <SummaryRow label="지역" value={school.district} />
             </div>
-          ) : null}
+          </div>
 
           <div className="apple-panel p-5">
             <div className="flex items-start gap-3 text-sm font-bold leading-6 text-[#6e6e73]">
@@ -114,4 +134,23 @@ export default async function SchoolPage({
       </section>
     </div>
   );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+      <span className="font-bold text-[#6e6e73]">{label}</span>
+      <span className="font-black text-[#1d1d1f]">{value}</span>
+    </div>
+  );
+}
+
+function genderLabel(value: "coed" | "boys" | "girls") {
+  if (value === "boys") {
+    return "남학교";
+  }
+  if (value === "girls") {
+    return "여학교";
+  }
+  return "공학";
 }

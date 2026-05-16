@@ -1,18 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  Check,
   ClipboardList,
   Plus,
   Save,
   Shield,
   Trash2,
-  X,
 } from "lucide-react";
-import { createBrowserSupabaseClient } from "@/lib/supabase";
-import type { CleanSurvey, SurveyQuestion, SurveyQuestionType } from "@/data/surveys";
-import type { PublicRuntimeConfig, SchoolReview } from "@/lib/types";
+import {
+  createBrowserSupabaseClient,
+  hasBrowserSupabaseConfig,
+} from "@/lib/supabase";
+import type {
+  CleanSurvey,
+  SurveyChoice,
+  SurveyQuestion,
+  SurveyQuestionType,
+} from "@/data/surveys";
+import type { SchoolReview } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type AdminTab = "surveys" | "reviews";
@@ -34,9 +40,23 @@ const metricTargets = [
   "distance",
 ] as const;
 
+const surveySteps = [
+  { label: "현재 상황", value: "profile" },
+  { label: "학교 적합도", value: "fit" },
+  { label: "선택 기준", value: "priorities" },
+  { label: "통학 기준", value: "commute" },
+] as const;
+
+function authHeadersFor(accessToken?: string) {
+  return accessToken
+    ? {
+        Authorization: `Bearer ${accessToken}`,
+      }
+    : undefined;
+}
+
 export function AdminDashboard() {
   const [tab, setTab] = useState<AdminTab>("surveys");
-  const [config, setConfig] = useState<PublicRuntimeConfig>();
   const [accessToken, setAccessToken] = useState<string>();
   const [reviews, setReviews] = useState<SchoolReview[]>([]);
   const [surveys, setSurveys] = useState<CleanSurvey[]>([]);
@@ -45,19 +65,9 @@ export function AdminDashboard() {
   const [status, setStatus] = useState("관리자 도구를 불러오는 중");
   const [surveyStatus, setSurveyStatus] = useState("");
 
-  const authHeaders = useCallback(
-    () =>
-      accessToken
-        ? {
-            Authorization: `Bearer ${accessToken}`,
-          }
-        : undefined,
-    [accessToken],
-  );
-
-  const loadReviews = useCallback(async () => {
+  const loadReviews = useCallback(async (token = accessToken) => {
     const response = await fetch("/api/admin/reviews", {
-      headers: authHeaders(),
+      headers: authHeadersFor(token),
     });
     const data = (await response.json()) as {
       reviews?: SchoolReview[];
@@ -65,17 +75,17 @@ export function AdminDashboard() {
     };
 
     if (!response.ok || !data.reviews) {
-      setStatus(data.message ?? "검수 목록을 불러오지 못했습니다.");
+      setStatus(data.message ?? "리뷰 목록을 불러오지 못했습니다.");
       return;
     }
 
     setReviews(data.reviews);
     setStatus(`리뷰 ${data.reviews.length}건`);
-  }, [authHeaders]);
+  }, [accessToken]);
 
-  const loadSurveys = useCallback(async () => {
+  const loadSurveys = useCallback(async (token = accessToken) => {
     const response = await fetch("/api/admin/surveys", {
-      headers: authHeaders(),
+      headers: authHeadersFor(token),
     });
     const data = (await response.json()) as {
       surveys?: CleanSurvey[];
@@ -95,30 +105,25 @@ export function AdminDashboard() {
       data.surveys.find((survey) => survey.id === activeId) ?? data.surveys[0],
     );
     setSurveyStatus("설문을 편집할 수 있습니다.");
-  }, [authHeaders]);
+  }, [accessToken]);
 
   useEffect(() => {
-    fetch("/api/config")
-      .then((response) => response.json())
-      .then(async (runtimeConfig: PublicRuntimeConfig) => {
-        setConfig(runtimeConfig);
-        const supabase = createBrowserSupabaseClient(runtimeConfig);
+    async function loadAdminData() {
+      try {
+        const supabase = createBrowserSupabaseClient();
         const session = await supabase?.auth.getSession();
         const token = session?.data.session?.access_token;
         setAccessToken(token);
 
-        await Promise.all([loadSurveys(), loadReviews()]);
-      })
-      .catch(() => {
+        await Promise.all([loadSurveys(token), loadReviews(token)]);
+      } catch {
         setStatus("관리자 설정을 불러오지 못했습니다.");
         setSurveyStatus("설문 설정을 불러오지 못했습니다.");
-      });
-  }, [loadReviews, loadSurveys]);
+      }
+    }
 
-  const pendingCount = useMemo(
-    () => reviews.filter((review) => review.status === "pending").length,
-    [reviews],
-  );
+    void loadAdminData();
+  }, [loadReviews, loadSurveys]);
 
   async function saveSurvey() {
     if (!draftSurvey) {
@@ -130,7 +135,7 @@ export function AdminDashboard() {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        ...authHeaders(),
+        ...authHeadersFor(accessToken),
       },
       body: JSON.stringify({
         survey: draftSurvey,
@@ -153,25 +158,6 @@ export function AdminDashboard() {
     setSurveys(data.surveys ?? [data.survey]);
     setActiveSurveyId(data.activeSurveyId ?? data.survey.id);
     setSurveyStatus("저장됐습니다. /survey 화면에 바로 반영됩니다.");
-  }
-
-  async function updateStatus(id: string, nextStatus: SchoolReview["status"]) {
-    const response = await fetch(`/api/admin/reviews/${id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders(),
-      },
-      body: JSON.stringify({ status: nextStatus }),
-    });
-
-    if (response.ok) {
-      setReviews((current) =>
-        current.map((review) =>
-          review.id === id ? { ...review, status: nextStatus } : review,
-        ),
-      );
-    }
   }
 
   return (
@@ -199,11 +185,11 @@ export function AdminDashboard() {
           </div>
           <div className="mt-6 divide-y divide-[#f1f1f4] rounded-2xl border border-[#e8e8ed] bg-white/60 text-sm">
             <AdminStatusLine
-              label="Supabase"
-              value={config?.hasSupabase ? "연결됨" : "로컬 모드"}
+              label="저장 상태"
+              value={hasBrowserSupabaseConfig() ? "연결됨" : "임시 모드"}
             />
             <AdminStatusLine label="활성 설문" value={activeSurveyId || "-"} />
-            <AdminStatusLine label="검수 대기" value={`${pendingCount}건`} />
+            <AdminStatusLine label="리뷰" value={`${reviews.length}건`} />
           </div>
           <div className="mt-6 grid gap-2">
             <TabButton
@@ -216,7 +202,7 @@ export function AdminDashboard() {
               active={tab === "reviews"}
               onClick={() => setTab("reviews")}
             >
-              리뷰 검수
+              리뷰 목록
             </TabButton>
           </div>
         </aside>
@@ -239,7 +225,7 @@ export function AdminDashboard() {
         ) : null}
 
         {tab === "reviews" ? (
-          <ReviewModeration reviews={reviews} onUpdateStatus={updateStatus} />
+          <ReviewModeration reviews={reviews} />
         ) : null}
       </section>
     </div>
@@ -417,15 +403,43 @@ function QuestionEditor({
   onChange: (patch: Partial<SurveyQuestion>) => void;
   onRemove: () => void;
 }) {
-  const choiceText =
-    question.choices?.map((choice) => choice.label).join("\n") ?? "";
+  function updateChoice(index: number, patch: Partial<SurveyChoice>) {
+    const choices = (question.choices ?? []).map((choice, itemIndex) =>
+      itemIndex === index ? { ...choice, ...patch } : choice,
+    );
+
+    onChange({ choices });
+  }
+
+  function addChoice() {
+    const choices = question.choices ?? [];
+    const nextIndex = choices.length + 1;
+    const nextChoice: SurveyChoice = {
+      id: `${question.id}-choice-${nextIndex}`,
+      label: `선택지 ${nextIndex}`,
+      value: `option-${nextIndex}`,
+    };
+
+    onChange({ choices: [...choices, nextChoice] });
+  }
+
+  function removeChoice(index: number) {
+    onChange({
+      choices: question.choices?.filter((_, itemIndex) => itemIndex !== index),
+    });
+  }
 
   return (
     <div className="grid gap-4 p-4 lg:grid-cols-[160px_1fr_44px]">
       <select
         value={question.type}
         onChange={(event) =>
-          onChange({ type: event.target.value as SurveyQuestionType })
+          onChange(
+            createQuestionTypePatch(
+              event.target.value as SurveyQuestionType,
+              question,
+            ),
+          )
         }
         className="apple-field h-10 px-3 text-sm"
       >
@@ -442,71 +456,61 @@ function QuestionEditor({
           value={question.title}
           onChange={(value) => onChange({ title: value })}
         />
-        {question.type === "single" || question.type === "multi" ? (
+        <label>
+          <div className="mb-1 text-xs font-black text-[#6e6e73]">설명</div>
+          <textarea
+            value={question.description ?? ""}
+            onChange={(event) =>
+              onChange({ description: event.target.value || undefined })
+            }
+            className="min-h-20 w-full rounded-2xl border border-[#d2d2d7] bg-white/90 p-3 text-sm font-semibold leading-6 outline-none transition focus:border-[var(--brand-primary)] focus:ring-4 focus:ring-[var(--brand-primary-ring)]"
+          />
+        </label>
+        <div className="grid gap-3 rounded-2xl border border-[#e8e8ed] bg-white/55 p-3 sm:grid-cols-3">
           <label>
-            <div className="mb-1 text-xs font-black text-[#6e6e73]">
-              선택지, 한 줄에 하나
-            </div>
-            <textarea
-              value={choiceText}
+            <div className="mb-1 text-xs font-black text-[#6e6e73]">단계</div>
+            <select
+              value={question.step ?? ""}
               onChange={(event) =>
                 onChange({
-                  choices: event.target.value
-                    .split("\n")
-                    .map((line) => line.trim())
-                    .filter(Boolean)
-                    .map((label, index) => ({
-                      id: `${question.id}-choice-${index + 1}`,
-                      label,
-                      value: label,
-                    })),
+                  step: event.target.value
+                    ? (event.target.value as SurveyQuestion["step"])
+                    : undefined,
                 })
               }
-              className="min-h-24 w-full rounded-2xl border border-[#d2d2d7] bg-white/90 p-3 text-sm font-semibold leading-6 outline-none transition focus:border-[var(--brand-primary)] focus:ring-4 focus:ring-[var(--brand-primary-ring)]"
-            />
+              className="apple-field h-10 w-full px-3 text-sm"
+            >
+              <option value="">자동</option>
+              {surveySteps.map((step) => (
+                <option key={step.value} value={step.value}>
+                  {step.label}
+                </option>
+              ))}
+            </select>
           </label>
+          <RequiredControl question={question} onChange={onChange} />
+          <StageVisibilityControl question={question} onChange={onChange} />
+        </div>
+
+        <DefaultValueEditor question={question} onChange={onChange} />
+
+        {question.type === "single" || question.type === "multi" ? (
+          <ChoiceListEditor
+            choices={question.choices ?? []}
+            onAdd={addChoice}
+            onChange={updateChoice}
+            onRemove={removeChoice}
+          />
         ) : null}
         {question.type === "scale" ? (
-          <div>
-            <div className="mb-2 text-xs font-black text-[#6e6e73]">
-              추천 가중치
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {metricTargets.map((metric) => {
-                const active = question.weightTargets?.includes(metric);
-                return (
-                  <button
-                    key={metric}
-                    type="button"
-                    onClick={() =>
-                      onChange({
-                        weightTargets: active
-                          ? question.weightTargets?.filter(
-                              (item) => item !== metric,
-                            )
-                          : [...(question.weightTargets ?? []), metric],
-                      })
-                    }
-                    className={cn(
-                      "rounded-full px-3 py-1 text-xs font-black transition",
-                      active
-                        ? "bg-[var(--brand-primary)] text-white"
-                        : "bg-white/72 text-[#6e6e73] ring-1 ring-[var(--line)] hover:bg-[var(--brand-primary-soft)]",
-                    )}
-                  >
-                    {metric}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <ScaleQuestionEditor question={question} onChange={onChange} />
         ) : null}
       </div>
 
       <button
         type="button"
         onClick={onRemove}
-      className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/72 text-[#6e6e73] ring-1 ring-[var(--line)] transition hover:bg-[#ff3b30] hover:text-white"
+        className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/72 text-[#6e6e73] ring-1 ring-[var(--line)] transition hover:bg-[#ff3b30] hover:text-white"
         aria-label="질문 삭제"
       >
         <Trash2 className="h-4 w-4" aria-hidden />
@@ -515,24 +519,349 @@ function QuestionEditor({
   );
 }
 
-function ReviewModeration({
-  reviews,
-  onUpdateStatus,
+function ChoiceListEditor({
+  choices,
+  onAdd,
+  onChange,
+  onRemove,
 }: {
-  reviews: SchoolReview[];
-  onUpdateStatus: (id: string, status: SchoolReview["status"]) => void;
+  choices: SurveyChoice[];
+  onAdd: () => void;
+  onChange: (index: number, patch: Partial<SurveyChoice>) => void;
+  onRemove: (index: number) => void;
 }) {
   return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="text-xs font-black text-[#6e6e73]">
+          선택지
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex h-8 items-center gap-1 rounded-full bg-white px-3 text-xs font-black text-[#1d1d1f] ring-1 ring-[var(--line-strong)] transition hover:bg-[var(--brand-primary-soft)]"
+        >
+          <Plus className="h-3.5 w-3.5" aria-hidden />
+          추가
+        </button>
+      </div>
+      <div className="space-y-2">
+        {choices.map((choice, index) => (
+          <div
+            key={choice.id}
+            className="grid gap-2 rounded-2xl border border-[#e8e8ed] bg-white/55 p-3 lg:grid-cols-[1fr_180px_1fr_36px]"
+          >
+            <AdminInput
+              label="표시 문구"
+              value={choice.label}
+              onChange={(value) => onChange(index, { label: value })}
+            />
+            <AdminInput
+              label="추천 값"
+              value={choice.value}
+              onChange={(value) => onChange(index, { value })}
+            />
+            <AdminInput
+              label="힌트"
+              value={choice.hint ?? ""}
+              onChange={(value) =>
+                onChange(index, { hint: value.trim() || undefined })
+              }
+            />
+            <button
+              type="button"
+              onClick={() => onRemove(index)}
+              className="mt-5 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/72 text-[#6e6e73] ring-1 ring-[var(--line)] transition hover:bg-[#ff3b30] hover:text-white"
+              aria-label="선택지 삭제"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RequiredControl({
+  question,
+  onChange,
+}: {
+  question: SurveyQuestion;
+  onChange: (patch: Partial<SurveyQuestion>) => void;
+}) {
+  if (question.type === "hidden" || question.type === "section") {
+    return (
+      <div className="text-xs font-bold leading-5 text-[#86868b]">
+        응답 필수 설정 없음
+      </div>
+    );
+  }
+
+  return (
+    <label className="flex h-10 items-center gap-2 text-sm font-black text-[#1d1d1f]">
+      <input
+        type="checkbox"
+        checked={Boolean(question.required)}
+        onChange={(event) => onChange({ required: event.target.checked })}
+        className="h-4 w-4 accent-[var(--brand-primary)]"
+      />
+      필수 응답
+    </label>
+  );
+}
+
+function StageVisibilityControl({
+  question,
+  onChange,
+}: {
+  question: SurveyQuestion;
+  onChange: (patch: Partial<SurveyQuestion>) => void;
+}) {
+  function toggleStage(stage: "elementary" | "middle") {
+    const current = question.visibleForStages ?? ["elementary", "middle"];
+    const next = current.includes(stage)
+      ? current.filter((item) => item !== stage)
+      : [...current, stage];
+
+    onChange({
+      visibleForStages:
+        next.length === 0 || next.length === 2 ? undefined : next,
+    });
+  }
+
+  return (
+    <div>
+      <div className="mb-1 text-xs font-black text-[#6e6e73]">노출</div>
+      <div className="flex gap-1">
+        {[
+          ["elementary", "초등"] as const,
+          ["middle", "중등"] as const,
+        ].map(([stage, label]) => {
+          const active =
+            !question.visibleForStages || question.visibleForStages.includes(stage);
+
+          return (
+            <button
+              key={stage}
+              type="button"
+              onClick={() => toggleStage(stage)}
+              className={cn(
+                "h-9 rounded-full px-3 text-xs font-black transition",
+                active
+                  ? "bg-[var(--brand-primary)] text-white"
+                  : "bg-white/72 text-[#86868b] ring-1 ring-[var(--line)]",
+              )}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DefaultValueEditor({
+  question,
+  onChange,
+}: {
+  question: SurveyQuestion;
+  onChange: (patch: Partial<SurveyQuestion>) => void;
+}) {
+  if (question.type === "section") {
+    return null;
+  }
+
+  if (question.type === "scale") {
+    return (
+      <NumberInput
+        label="기본값"
+        value={Number(question.defaultValue ?? 3)}
+        onChange={(value) => onChange({ defaultValue: value })}
+      />
+    );
+  }
+
+  if (question.type === "multi") {
+    const values = Array.isArray(question.defaultValue)
+      ? question.defaultValue.join(", ")
+      : "";
+
+    return (
+      <AdminInput
+        label="기본값"
+        value={values}
+        onChange={(value) =>
+          onChange({
+            defaultValue: value
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean),
+          })
+        }
+      />
+    );
+  }
+
+  return (
+    <AdminInput
+      label="기본값"
+      value={String(question.defaultValue ?? "")}
+      onChange={(value) => onChange({ defaultValue: value })}
+    />
+  );
+}
+
+function ScaleQuestionEditor({
+  question,
+  onChange,
+}: {
+  question: SurveyQuestion;
+  onChange: (patch: Partial<SurveyQuestion>) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <NumberInput
+          label="최솟값"
+          value={question.min ?? 1}
+          onChange={(value) => onChange({ min: value })}
+        />
+        <NumberInput
+          label="최댓값"
+          value={question.max ?? 5}
+          onChange={(value) => onChange({ max: value })}
+        />
+        <AdminInput
+          label="낮은 쪽 라벨"
+          value={question.minLabel ?? ""}
+          onChange={(value) => onChange({ minLabel: value || undefined })}
+        />
+        <AdminInput
+          label="높은 쪽 라벨"
+          value={question.maxLabel ?? ""}
+          onChange={(value) => onChange({ maxLabel: value || undefined })}
+        />
+      </div>
+      <div>
+        <div className="mb-2 text-xs font-black text-[#6e6e73]">
+          추천 가중치
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {metricTargets.map((metric) => {
+            const active = question.weightTargets?.includes(metric);
+            return (
+              <button
+                key={metric}
+                type="button"
+                onClick={() =>
+                  onChange({
+                    weightTargets: active
+                      ? question.weightTargets?.filter((item) => item !== metric)
+                      : [...(question.weightTargets ?? []), metric],
+                  })
+                }
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs font-black transition",
+                  active
+                    ? "bg-[var(--brand-primary)] text-white"
+                    : "bg-white/72 text-[#6e6e73] ring-1 ring-[var(--line)] hover:bg-[var(--brand-primary-soft)]",
+                )}
+              >
+                {metric}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function createQuestionTypePatch(
+  type: SurveyQuestionType,
+  question: SurveyQuestion,
+): Partial<SurveyQuestion> {
+  if (type === "scale") {
+    return {
+      type,
+      choices: undefined,
+      min: question.min ?? 1,
+      max: question.max ?? 5,
+      minLabel: question.minLabel ?? "낮음",
+      maxLabel: question.maxLabel ?? "높음",
+      defaultValue:
+        typeof question.defaultValue === "number" ? question.defaultValue : 3,
+      weightTargets: question.weightTargets ?? ["environment"],
+    };
+  }
+
+  if (type === "section") {
+    return {
+      type,
+      choices: undefined,
+      defaultValue: undefined,
+      required: undefined,
+      weightTargets: undefined,
+      min: undefined,
+      max: undefined,
+      minLabel: undefined,
+      maxLabel: undefined,
+    };
+  }
+
+  if (type === "hidden") {
+    return {
+      type,
+      choices: undefined,
+      defaultValue:
+        typeof question.defaultValue === "string" ? question.defaultValue : "",
+      required: undefined,
+      weightTargets: undefined,
+      min: undefined,
+      max: undefined,
+      minLabel: undefined,
+      maxLabel: undefined,
+    };
+  }
+
+  return {
+    type,
+    choices: question.choices?.length
+      ? question.choices
+      : [
+          { id: `${question.id}-choice-1`, label: "선택지 1", value: "option-1" },
+          { id: `${question.id}-choice-2`, label: "선택지 2", value: "option-2" },
+        ],
+    defaultValue:
+      type === "multi"
+        ? Array.isArray(question.defaultValue)
+          ? question.defaultValue
+          : []
+        : typeof question.defaultValue === "string"
+          ? question.defaultValue
+          : "option-1",
+    weightTargets: undefined,
+    min: undefined,
+    max: undefined,
+    minLabel: undefined,
+    maxLabel: undefined,
+  };
+}
+
+function ReviewModeration({ reviews }: { reviews: SchoolReview[] }) {
+  return (
     <main className="apple-panel overflow-x-auto">
-      <div className="grid min-w-[720px] grid-cols-[1fr_120px_180px] border-b border-[var(--line)] bg-white/48 px-4 py-3 text-xs font-black text-[#86868b]">
+      <div className="grid min-w-[720px] grid-cols-[1fr_120px_160px] border-b border-[var(--line)] bg-white/48 px-4 py-3 text-xs font-black text-[#86868b]">
         <span>리뷰</span>
         <span>상태</span>
-        <span>검수</span>
+        <span>작성일</span>
       </div>
       {reviews.map((review) => (
         <div
           key={review.id}
-          className="apple-row-hover grid min-w-[720px] grid-cols-[1fr_120px_180px] items-center border-b border-[#f1f1f4] px-4 py-4 last:border-b-0"
+          className="apple-row-hover grid min-w-[720px] grid-cols-[1fr_120px_160px] items-center border-b border-[#f1f1f4] px-4 py-4 last:border-b-0"
         >
           <div>
             <div className="font-black text-[#1d1d1f]">{review.authorName}</div>
@@ -541,23 +870,8 @@ function ReviewModeration({
             </p>
           </div>
           <div className="text-sm font-black text-[#6e6e73]">{review.status}</div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => onUpdateStatus(review.id, "approved")}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#34c759] text-white transition hover:brightness-95"
-              aria-label="승인"
-            >
-              <Check className="h-4 w-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              onClick={() => onUpdateStatus(review.id, "rejected")}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#1d1d1f] text-white transition hover:bg-[#ff3b30]"
-              aria-label="반려"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
+          <div className="text-sm font-bold text-[#86868b]">
+            {new Date(review.createdAt).toLocaleDateString("ko-KR")}
           </div>
         </div>
       ))}
@@ -605,6 +919,28 @@ function AdminInput({
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        className="apple-field h-10 w-full px-4 text-sm"
+      />
+    </label>
+  );
+}
+
+function NumberInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label>
+      <div className="mb-1 text-xs font-black text-[#6e6e73]">{label}</div>
+      <input
+        type="number"
+        value={Number.isFinite(value) ? value : 0}
+        onChange={(event) => onChange(Number(event.target.value))}
         className="apple-field h-10 w-full px-4 text-sm"
       />
     </label>

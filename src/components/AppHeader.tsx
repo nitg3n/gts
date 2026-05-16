@@ -30,7 +30,6 @@ export function AppHeader() {
               width={32}
               height={32}
               className="h-7 w-7 object-contain"
-              priority
             />
           </span>
           <span className="text-[15px] font-black tracking-tight text-[#1d1d1f]">

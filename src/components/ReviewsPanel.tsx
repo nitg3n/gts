@@ -85,7 +85,7 @@ export function ReviewsPanel({
       return;
     }
 
-    setStatus("리뷰가 검토 대기 상태로 저장되었습니다.");
+    setStatus("리뷰가 바로 공개되었습니다.");
     setReviews((current) => [data.review!, ...current]);
     setBody("");
   }
@@ -119,7 +119,6 @@ export function ReviewsPanel({
                     <div className="mt-1 text-sm font-bold text-[#86868b]">
                       {review.relation === "current" ? "재학생" : "졸업생"} ·{" "}
                       {review.enrolledYear} 입학
-                      {review.status === "pending" ? " · 검토 중" : ""}
                     </div>
                   </div>
                   <div className="inline-flex items-center gap-1 rounded-full bg-[#fff7e8] px-3 py-1 text-sm font-black text-[#1d1d1f]">
@@ -221,10 +220,10 @@ export function ReviewsPanel({
             onClick={submitReview}
             className="apple-button-primary mt-3 h-11 w-full text-sm"
           >
-            검토 요청
+            리뷰 공개
           </button>
           <p className="mt-3 text-xs font-bold leading-5 text-[#86868b]">
-            {status || "제출한 리뷰와 평점은 Supabase에 저장됩니다."}
+            {status || "제출한 리뷰와 평점은 바로 공개됩니다."}
           </p>
         </aside>
       </div>

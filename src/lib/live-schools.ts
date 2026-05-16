@@ -7,6 +7,13 @@ import type {
   SchoolLevel,
   SchoolMetrics,
 } from "@/lib/types";
+import { hasOfficialSchoolData } from "@/lib/school-data-quality";
+import {
+  createSchoolSlug,
+  ensureUniqueSchoolSlugs,
+  normalizeSchoolIdParam,
+  schoolNameFromSlug,
+} from "@/lib/school-slug";
 
 type KakaoPlace = {
   id: string;
@@ -26,6 +33,13 @@ type KakaoCategoryResponse = {
   meta?: {
     is_end?: boolean;
   };
+};
+
+type KakaoRegionResponse = {
+  documents?: Array<{
+    code?: string;
+    region_type?: string;
+  }>;
 };
 
 type NeisSchoolInfoRow = {
@@ -78,9 +92,14 @@ export type NearbySchoolSearchResult = {
 
 const KAKAO_LOCAL_CATEGORY_URL =
   "https://dapi.kakao.com/v2/local/search/category.json";
+const KAKAO_LOCAL_KEYWORD_URL =
+  "https://dapi.kakao.com/v2/local/search/keyword.json";
+const KAKAO_COORD2REGION_URL =
+  "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json";
 const NEIS_SCHOOL_INFO_URL = "https://open.neis.go.kr/hub/schoolInfo";
 const SCHOOL_DISCLOSURE_URL = "https://www.schoolinfo.go.kr/openApi.do";
 const disclosureListCache = new Map<string, Promise<SchoolDisclosureRow[]>>();
+const regionCodeCache = new Map<string, Promise<string | undefined>>();
 
 export async function fetchNearbyLiveSchools({
   lat,
@@ -134,22 +153,87 @@ export async function fetchNearbyLiveSchools({
       ),
     );
 
-    const schools = filteredPlaces.map(({ place, inferredLevel }, index) =>
-      mapPlaceToSchool(
-        place,
-        inferredLevel!,
-        neisRows[index],
-        disclosureFacts[index],
-      ),
+    const schools = ensureUniqueSchoolSlugs(
+      filteredPlaces
+        .map(({ place, inferredLevel }, index) =>
+          mapPlaceToSchool(
+            place,
+            inferredLevel!,
+            neisRows[index],
+            disclosureFacts[index],
+          ),
+        )
+        .filter(hasOfficialSchoolData),
     );
+
+    if (schools.length === 0) {
+      return undefined;
+    }
 
     return {
       schools,
-      source: schools.some((school) => school.source === "kakao-neis")
-        ? "kakao-neis"
-        : "kakao",
+      source: "kakao-neis",
       usedRadiusKm,
     };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function fetchLiveSchoolBySlug(id: string) {
+  const kakaoRestKey = process.env.KAKAO_REST_API_KEY;
+  const normalizedId = normalizeSchoolIdParam(id);
+  const schoolName = schoolNameFromSlug(normalizedId);
+
+  if (!kakaoRestKey || !schoolName) {
+    return undefined;
+  }
+
+  try {
+    const places = await fetchKakaoSchoolKeywordPlaces({
+      query: schoolName,
+      restKey: kakaoRestKey,
+    });
+    const filteredPlaces = uniqueBy(places, (place) => place.id)
+      .map((place) => ({
+        place,
+        inferredLevel: inferLevel(place.place_name, place.category_name),
+      }))
+      .filter(({ inferredLevel }) => inferredLevel)
+      .slice(0, 6);
+
+    if (filteredPlaces.length === 0) {
+      return undefined;
+    }
+
+    const neisRows = await Promise.all(
+      filteredPlaces.map(({ place, inferredLevel }) =>
+        fetchNeisSchoolInfo(place.place_name, inferredLevel),
+      ),
+    );
+    const disclosureFacts = await Promise.all(
+      filteredPlaces.map(({ place, inferredLevel }, index) =>
+        fetchSchoolDisclosureFacts(place, inferredLevel!, neisRows[index]),
+      ),
+    );
+    const schools = ensureUniqueSchoolSlugs(
+      filteredPlaces
+        .map(({ place, inferredLevel }, index) =>
+          mapPlaceToSchool(
+            place,
+            inferredLevel!,
+            neisRows[index],
+            disclosureFacts[index],
+          ),
+        )
+        .filter(hasOfficialSchoolData),
+    );
+
+    return (
+      schools.find((school) => school.id === normalizedId) ??
+      schools.find((school) => normalizeSchoolName(school.name) === schoolName) ??
+      schools[0]
+    );
   } catch {
     return undefined;
   }
@@ -201,6 +285,109 @@ async function fetchKakaoSchoolPlaces({
   }
 
   return places;
+}
+
+async function fetchKakaoSchoolKeywordPlaces({
+  query,
+  restKey,
+}: {
+  query: string;
+  restKey: string;
+}) {
+  const places: KakaoPlace[] = [];
+
+  for (let page = 1; page <= 2; page += 1) {
+    const url = new URL(KAKAO_LOCAL_KEYWORD_URL);
+    url.search = new URLSearchParams({
+      query,
+      category_group_code: "SC4",
+      page: String(page),
+      size: "10",
+    }).toString();
+
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Authorization: `KakaoAK ${restKey}`,
+      },
+      signal: AbortSignal.timeout(4500),
+    });
+
+    if (!response.ok) {
+      throw new Error("Kakao Local keyword request failed");
+    }
+
+    const data = (await response.json()) as KakaoCategoryResponse;
+    places.push(...(data.documents ?? []));
+
+    if (data.meta?.is_end) {
+      break;
+    }
+  }
+
+  return places;
+}
+
+async function fetchKakaoRegionCode(place: KakaoPlace) {
+  const restKey = process.env.KAKAO_REST_API_KEY;
+  const lng = Number(place.x);
+  const lat = Number(place.y);
+
+  if (!restKey || !Number.isFinite(lng) || !Number.isFinite(lat)) {
+    return undefined;
+  }
+
+  const cacheKey = `${lng.toFixed(4)}:${lat.toFixed(4)}`;
+  const cached = regionCodeCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const promise = fetchKakaoRegionCodeUncached({ lng, lat, restKey });
+  regionCodeCache.set(cacheKey, promise);
+
+  return promise;
+}
+
+async function fetchKakaoRegionCodeUncached({
+  lng,
+  lat,
+  restKey,
+}: {
+  lng: number;
+  lat: number;
+  restKey: string;
+}) {
+  try {
+    const url = new URL(KAKAO_COORD2REGION_URL);
+    url.search = new URLSearchParams({
+      x: String(lng),
+      y: String(lat),
+    }).toString();
+
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Authorization: `KakaoAK ${restKey}`,
+      },
+      signal: AbortSignal.timeout(2500),
+    });
+
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const data = (await response.json()) as KakaoRegionResponse;
+    const region =
+      data.documents?.find((document) => document.region_type === "B") ??
+      data.documents?.[0];
+    const code = region?.code?.slice(0, 10);
+
+    return code && /^\d{10}$/.test(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function fetchNeisSchoolInfo(
@@ -259,20 +446,22 @@ function mapPlaceToSchool(
   );
   const district = inferDistrict(address, neis);
   const gender = inferGender(neis?.COEDU_SC_NM);
-  const source: SchoolDataSource = neis ? "kakao-neis" : "kakao";
-  const metrics = inferMetrics(category, place.place_name, level);
   const commuteNote = formatCommute(place.distance);
+  const metrics = inferMetrics(category, place.place_name, level, disclosureFacts);
   const tags = inferTags(category, place.place_name, level);
+  const name = neis?.SCHUL_NM ?? place.place_name;
 
   const hasDisclosureFacts =
     Boolean(disclosureFacts?.students) ||
     Boolean(disclosureFacts?.classes) ||
     Boolean(disclosureFacts?.teachers) ||
-    Boolean(disclosureFacts?.clubs);
+    Boolean(disclosureFacts?.clubs) ||
+    Boolean(disclosureFacts?.libraryBooks);
+  const source: SchoolDataSource = neis || hasDisclosureFacts ? "kakao-neis" : "kakao";
 
   return {
-    id: `kakao-${place.id}`,
-    name: neis?.SCHUL_NM ?? place.place_name,
+    id: createSchoolSlug({ name, district, address }),
+    name,
     level,
     category,
     district,
@@ -284,21 +473,8 @@ function mapPlaceToSchool(
     phone: firstPresent(neis?.ORG_TELNO, place.phone),
     website: firstPresent(neis?.HMPG_ADRES, place.place_url),
     tags,
-    description:
-      hasDisclosureFacts
-        ? "현재 위치 주변에서 찾은 실제 학교이며, NEIS 기본정보와 학교알리미 공시 지표를 함께 반영했습니다."
-        : source === "kakao-neis"
-        ? "현재 위치 주변에서 찾은 실제 학교이며, NEIS 학교기본정보로 기본 정보를 보강했습니다."
-        : "현재 위치 주변에서 찾은 실제 학교입니다. 세부 공시 정보는 추가 연동이 필요합니다.",
-    highlights: [
-      "현재 위치 기반 실제 후보",
-      hasDisclosureFacts
-        ? "학교알리미 공시 지표 반영"
-        : source === "kakao-neis"
-          ? "NEIS 기본정보 매칭"
-          : "Kakao Local 위치 정보",
-      commuteNote,
-    ],
+    description: buildSchoolDescription(disclosureFacts, hasDisclosureFacts),
+    highlights: buildSchoolHighlights(disclosureFacts, commuteNote),
     metrics,
     source,
     externalIds: {
@@ -325,12 +501,14 @@ async function fetchSchoolDisclosureFacts(
   neis?: NeisSchoolInfoRow,
 ): Promise<SchoolDisclosureFacts | undefined> {
   const apiKey = process.env.SCHOOL_INFO_OPEN_API_KEY;
+  const regionCode = await fetchKakaoRegionCode(place);
   const sidoCode = inferSidoCode(
     firstPresent(neis?.ORG_RDNMA, place.road_address_name, place.address_name),
     neis,
-  );
+  ) ?? regionCode?.slice(0, 2);
+  const sggCode = regionCode?.slice(0, 5);
 
-  if (!apiKey || !sidoCode) {
+  if (!apiKey || !sidoCode || !sggCode) {
     return undefined;
   }
 
@@ -342,6 +520,7 @@ async function fetchSchoolDisclosureFacts(
       apiType: "09",
       year,
       sidoCode,
+      sggCode,
       kindCode,
     }),
     fetchDisclosureList({
@@ -349,6 +528,7 @@ async function fetchSchoolDisclosureFacts(
       apiType: "56",
       year,
       sidoCode,
+      sggCode,
       kindCode,
     }),
   ]);
@@ -377,15 +557,17 @@ async function fetchDisclosureList({
   apiType,
   year,
   sidoCode,
+  sggCode,
   kindCode,
 }: {
   apiKey: string;
   apiType: string;
   year: number;
   sidoCode: string;
+  sggCode: string;
   kindCode: string;
 }) {
-  const cacheKey = `${apiType}:${year}:${sidoCode}:${kindCode}`;
+  const cacheKey = `${apiType}:${year}:${sidoCode}:${sggCode}:${kindCode}`;
   const cached = disclosureListCache.get(cacheKey);
 
   if (cached) {
@@ -397,6 +579,7 @@ async function fetchDisclosureList({
     apiType,
     year,
     sidoCode,
+    sggCode,
     kindCode,
   });
   disclosureListCache.set(cacheKey, promise);
@@ -409,12 +592,14 @@ async function fetchDisclosureListUncached({
   apiType,
   year,
   sidoCode,
+  sggCode,
   kindCode,
 }: {
   apiKey: string;
   apiType: string;
   year: number;
   sidoCode: string;
+  sggCode: string;
   kindCode: string;
 }) {
   try {
@@ -424,7 +609,7 @@ async function fetchDisclosureListUncached({
       apiType,
       pbanYr: String(year),
       sidoCode,
-      sggCode: "00000",
+      sggCode,
       schulKndCode: kindCode,
     }).toString();
 
@@ -536,6 +721,7 @@ function inferMetrics(
   category: string,
   name: string,
   level: SchoolLevel,
+  facts?: SchoolDisclosureFacts,
 ): SchoolMetrics {
   const text = `${category} ${name}`;
   const metrics: SchoolMetrics = {
@@ -562,15 +748,102 @@ function inferMetrics(
     metrics.stability += 5;
   }
 
+  const studentsPerClass = ratio(facts?.students, facts?.classes);
+  const studentsPerTeacher = ratio(facts?.students, facts?.teachers);
+
+  if (studentsPerClass > 0) {
+    metrics.environment = Math.max(metrics.environment, 98 - studentsPerClass);
+  }
+
+  if (studentsPerTeacher > 0) {
+    metrics.stability = Math.max(metrics.stability, 104 - studentsPerTeacher * 2.3);
+  }
+
+  if (isPositive(facts?.clubs)) {
+    metrics.activities = Math.max(metrics.activities, 58 + (facts?.clubs ?? 0) * 0.95);
+  }
+
   return Object.fromEntries(
     Object.entries(metrics).map(([key, value]) => [key, clamp(value, 0, 100)]),
   ) as SchoolMetrics;
 }
 
+function buildSchoolDescription(
+  facts: SchoolDisclosureFacts | undefined,
+  hasDisclosureFacts: boolean,
+) {
+  if (!hasDisclosureFacts) {
+    return "선택한 위치 주변에서 확인된 학교입니다. 학교 생활과 통학 조건을 함께 비교할 수 있습니다.";
+  }
+
+  const details: string[] = [];
+  const studentsPerClass = ratio(facts?.students, facts?.classes);
+  const studentsPerTeacher = ratio(facts?.students, facts?.teachers);
+
+  if (isPositive(facts?.students)) {
+    details.push(`학생 ${formatWhole(facts?.students)}명`);
+  }
+
+  if (studentsPerClass > 0) {
+    details.push(`학급당 ${formatDecimal(studentsPerClass)}명`);
+  }
+
+  if (studentsPerTeacher > 0) {
+    details.push(`교원 1인당 ${formatDecimal(studentsPerTeacher)}명`);
+  }
+
+  if (isPositive(facts?.clubs)) {
+    details.push(`동아리 ${formatWhole(facts?.clubs)}개`);
+  }
+
+  if (isPositive(facts?.libraryBooks)) {
+    details.push(`장서 ${formatWhole(facts?.libraryBooks)}권`);
+  }
+
+  if (details.length === 0) {
+    return "학교 생활과 통학 조건을 함께 비교할 수 있습니다.";
+  }
+
+  return `${details.join(", ")} 기준으로 학교 규모와 활동 여건을 비교할 수 있습니다.`;
+}
+
+function buildSchoolHighlights(
+  facts: SchoolDisclosureFacts | undefined,
+  commuteNote: string,
+) {
+  const highlights: string[] = [];
+  const studentsPerClass = ratio(facts?.students, facts?.classes);
+  const studentsPerTeacher = ratio(facts?.students, facts?.teachers);
+
+  if (studentsPerClass > 0) {
+    highlights.push(`학급당 ${formatDecimal(studentsPerClass)}명`);
+  }
+
+  if (studentsPerTeacher > 0) {
+    highlights.push(`교원당 ${formatDecimal(studentsPerTeacher)}명`);
+  }
+
+  if (isPositive(facts?.clubs)) {
+    highlights.push(`동아리 ${formatWhole(facts?.clubs)}개`);
+  }
+
+  if (isPositive(facts?.libraryBooks)) {
+    highlights.push(`장서 ${formatWhole(facts?.libraryBooks)}권`);
+  }
+
+  if (highlights.length === 0) {
+    highlights.push("위치 조건에 맞는 후보");
+  }
+
+  highlights.push(commuteNote);
+
+  return [...new Set(highlights)].slice(0, 4);
+}
+
 function inferTags(category: string, name: string, level: SchoolLevel) {
   const text = `${category} ${name}`;
   const tags = new Set<string>([
-    "실제 위치",
+    "위치 확인",
     level === "high" ? "고등학교" : "중학교",
   ]);
 
@@ -673,12 +946,40 @@ function formatCommute(distance?: string) {
   const meters = Number(distance);
 
   if (!Number.isFinite(meters) || meters <= 0) {
-    return "Kakao Local 기준 위치";
+    return "선택한 위치 주변";
   }
 
   return meters < 1000
-    ? `현재 위치에서 약 ${Math.round(meters)}m`
-    : `현재 위치에서 약 ${(meters / 1000).toFixed(1)}km`;
+    ? `선택한 위치에서 약 ${Math.round(meters)}m`
+    : `선택한 위치에서 약 ${(meters / 1000).toFixed(1)}km`;
+}
+
+function ratio(numerator?: number, denominator?: number) {
+  if (
+    !Number.isFinite(numerator) ||
+    !Number.isFinite(denominator) ||
+    !denominator ||
+    denominator <= 0
+  ) {
+    return 0;
+  }
+
+  return (numerator ?? 0) / denominator;
+}
+
+function isPositive(value?: number) {
+  return Number.isFinite(value) && (value ?? 0) > 0;
+}
+
+function formatWhole(value?: number) {
+  return Math.round(value ?? 0).toLocaleString("ko-KR");
+}
+
+function formatDecimal(value: number) {
+  return value.toLocaleString("ko-KR", {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 1,
+  });
 }
 
 function firstPresent(...values: Array<string | undefined>) {

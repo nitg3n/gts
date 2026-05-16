@@ -1,8 +1,14 @@
 import "server-only";
 
-import { rankSchools, surveyAnswerSchema } from "@/lib/recommendation";
+import {
+  normalizeSurveyAnswerForRecommendation,
+  rankSchools,
+  surveyAnswerSchema,
+} from "@/lib/recommendation";
+import { fetchLiveSchoolBySlug } from "@/lib/live-schools";
 import { getSchoolById, schools } from "@/lib/schools";
-import { queryPersistentStore } from "@/lib/persistence";
+import { normalizeSchoolIdParam } from "@/lib/school-slug";
+import { hasPersistentDatabase, queryPersistentStore } from "@/lib/persistence";
 import { surveys as defaultSurveys } from "@/data/surveys";
 import type { CleanSurvey } from "@/data/surveys";
 import type {
@@ -68,7 +74,39 @@ export function cacheSchools(nextSchools: School[]) {
 }
 
 export function getCachedSchool(id: string) {
-  return getStore().schools.get(id) ?? getSchoolById(id);
+  const normalizedId = normalizeSchoolIdParam(id);
+  const store = getStore();
+  const direct = store.schools.get(normalizedId) ?? getSchoolById(normalizedId);
+
+  if (direct) {
+    return direct;
+  }
+
+  if (normalizedId.startsWith("kakao-")) {
+    const kakaoPlaceId = normalizedId.replace(/^kakao-/, "");
+
+    return [...store.schools.values()].find(
+      (school) => school.externalIds?.kakaoPlaceId === kakaoPlaceId,
+    );
+  }
+
+  return undefined;
+}
+
+export async function getSchoolByRouteId(id: string) {
+  const cached = getCachedSchool(id);
+
+  if (cached) {
+    return cached;
+  }
+
+  const liveSchool = await fetchLiveSchoolBySlug(id);
+
+  if (liveSchool) {
+    cacheSchools([liveSchool]);
+  }
+
+  return liveSchool;
 }
 
 export async function listSurveyDefinitions() {
@@ -102,6 +140,20 @@ export async function saveSurveyDefinition(
   const activeId = await getActiveSurveyId();
   const store = getStore();
   const cleanSurvey = normalizeSurveyDefinition(survey);
+  const shouldActivateInMemory = Boolean(
+    activeSurveyId || store.activeSurveyId === survey.id,
+  );
+  const persistentActiveSurveyId =
+    activeSurveyId ?? (activeId === cleanSurvey.id ? cleanSurvey.id : undefined);
+  const persisted = await writePersistentSurveyDefinition(
+    cleanSurvey,
+    persistentActiveSurveyId,
+  );
+
+  if (hasPersistentDatabase() && !persisted) {
+    throw new Error("설문을 Supabase에 저장하지 못했습니다.");
+  }
+
   const existingIndex = store.surveys.findIndex((item) => item.id === cleanSurvey.id);
 
   if (existingIndex >= 0) {
@@ -110,14 +162,9 @@ export async function saveSurveyDefinition(
     store.surveys.push(cleanSurvey);
   }
 
-  if (activeSurveyId || store.activeSurveyId === survey.id) {
+  if (shouldActivateInMemory) {
     store.activeSurveyId = activeSurveyId ?? cleanSurvey.id;
   }
-
-  await writePersistentSurveyDefinition(
-    cleanSurvey,
-    activeSurveyId ?? (activeId === cleanSurvey.id ? cleanSurvey.id : undefined),
-  );
 
   return cloneSurvey(cleanSurvey);
 }
@@ -137,11 +184,12 @@ export async function saveSurveyAnswer(
   candidates?: School[],
   source?: StoredSurveyResponse["source"],
 ) {
-  const answer = surveyAnswerSchema.parse(rawAnswer) as SurveyAnswer;
-  const schoolCandidates =
-    candidates && candidates.length > 0 ? candidates : undefined;
+  const answer = normalizeSurveyAnswerForRecommendation(
+    surveyAnswerSchema.parse(rawAnswer) as SurveyAnswer,
+  );
+  const schoolCandidates = Array.isArray(candidates) ? candidates : undefined;
 
-  if (schoolCandidates) {
+  if (schoolCandidates?.length) {
     cacheSchools(schoolCandidates);
   }
 
@@ -225,7 +273,7 @@ export async function createReview(
   const newReview: SchoolReview = {
     ...review,
     id: createId("review"),
-    status: "pending",
+    status: "approved",
     createdAt: new Date().toISOString(),
   };
 
@@ -307,7 +355,7 @@ async function writePersistentSurveyDefinition(
   survey: CleanSurvey,
   activeSurveyId?: string,
 ) {
-  await writePersistent(async () => {
+  return writePersistent(async () => {
     if (activeSurveyId) {
       await queryPersistentStore(
         "update public.gts_surveys set is_active = false where is_active = true",
@@ -474,12 +522,18 @@ async function readPersistent<T>(operation: () => Promise<T | undefined>) {
 }
 
 async function writePersistent(operation: () => Promise<void>) {
+  if (!hasPersistentDatabase()) {
+    return false;
+  }
+
   try {
     await ensurePersistentDefaults();
     await operation();
+    return true;
   } catch (error) {
     logPersistentStoreError(error);
     // Keep local development usable even if the database is unavailable.
+    return false;
   }
 }
 
@@ -503,26 +557,42 @@ async function seedPersistentDefaults() {
     return;
   }
 
-  if (Number(surveyCount.rows[0]?.count ?? 0) === 0) {
-    await Promise.all(
-      defaultSurveys.map((survey, index) =>
-        queryPersistentStore(
-          `
-            insert into public.gts_surveys (id, payload, is_active)
-            values ($1, $2::jsonb, $3)
-            on conflict (id) do nothing
-          `,
-          [survey.id, JSON.stringify(survey), index === 0],
-        ),
+  await Promise.all(
+    defaultSurveys.map((survey, index) =>
+      queryPersistentStore(
+        `
+          insert into public.gts_surveys (id, payload, is_active)
+          values ($1, $2::jsonb, $3)
+          on conflict (id) do nothing
+        `,
+        [
+          survey.id,
+          JSON.stringify(survey),
+          Number(surveyCount.rows[0]?.count ?? 0) === 0 && index === 0,
+        ],
       ),
-    );
-  }
-
-  const activeSurveyCount = await queryPersistentStore<{ count: string }>(
-    "select count(*) from public.gts_surveys where is_active = true",
+    ),
   );
 
-  if (Number(activeSurveyCount?.rows[0]?.count ?? 0) === 0) {
+  const activeSurvey = await queryPersistentStore<{ id: string }>(
+    `
+      select id
+      from public.gts_surveys
+      where is_active = true
+      order by updated_at desc
+      limit 1
+    `,
+  );
+  const activeSurveyId = activeSurvey?.rows[0]?.id;
+  const shouldActivateCurrentDefault =
+    !activeSurveyId ||
+    (activeSurveyId.startsWith("school-selection-") &&
+      activeSurveyId !== defaultSurveys[0].id);
+
+  if (shouldActivateCurrentDefault) {
+    await queryPersistentStore(
+      "update public.gts_surveys set is_active = false where is_active = true",
+    );
     await queryPersistentStore(
       "update public.gts_surveys set is_active = true where id = $1",
       [defaultSurveys[0].id],

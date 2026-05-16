@@ -11,6 +11,17 @@ describe("deriveSurveyAnswer", () => {
     expect(answer.rawResponses?.targetLevel).toBe("high");
   });
 
+  it("ignores stale targetLevel values for middle-school students", () => {
+    const answer = deriveSurveyAnswer({
+      ...getDefaultSurveyResponses(),
+      studentStage: "middle",
+      targetLevel: "middle",
+    });
+
+    expect(answer.studentStage).toBe("middle");
+    expect(answer.level).toBe("high");
+  });
+
   it("maps strict commute answers to nearby-school preference", () => {
     const answer = deriveSurveyAnswer({
       ...getDefaultSurveyResponses(),
@@ -44,5 +55,31 @@ describe("deriveSurveyAnswer", () => {
     expect(answer.categoryPreference).toBe("특성화고");
     expect(answer.preferredTags).toContain("실습");
     expect(answer.preferredTags).toContain("동아리");
+  });
+
+  it("infers category and tags from career direction when the category is undecided", () => {
+    const answer = deriveSurveyAnswer({
+      ...getDefaultSurveyResponses(),
+      categoryPreference: "any",
+      careerDirection: "science",
+      activityPreference: ["project"],
+    });
+
+    expect(answer.categoryPreference).toBe("과학고");
+    expect(answer.preferredTags).toContain("과학");
+    expect(answer.preferredTags).toContain("프로젝트");
+  });
+
+  it("uses transition concerns to strengthen commute and care signals", () => {
+    const answer = deriveSurveyAnswer({
+      ...getDefaultSurveyResponses(),
+      commuteImportance: 3,
+      commuteTime: "balanced",
+      transitionConcern: ["commute", "friends"],
+    });
+
+    expect(answer.distancePreference).toBe("near");
+    expect(answer.preferredTags).toContain("통학");
+    expect(answer.preferredTags).toContain("상담");
   });
 });

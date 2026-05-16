@@ -1,31 +1,40 @@
 import { fetchNearbyLiveSchools } from "@/lib/live-schools";
 import { saveSurveyAnswer } from "@/lib/store";
-import { surveyAnswerSchema } from "@/lib/recommendation";
+import {
+  normalizeSurveyAnswerForRecommendation,
+  surveyAnswerSchema,
+} from "@/lib/recommendation";
 import type { SurveyAnswer } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const answer = surveyAnswerSchema.parse(body) as SurveyAnswer;
+    const answer = normalizeSurveyAnswerForRecommendation(
+      surveyAnswerSchema.parse(body) as SurveyAnswer,
+    );
+    const lat = answer.lat;
+    const lng = answer.lng;
+    const hasLocation = typeof lat === "number" && typeof lng === "number";
     const liveResult =
-      typeof answer.lat === "number" && typeof answer.lng === "number"
+      hasLocation
         ? await fetchNearbyLiveSchools({
-            lat: answer.lat,
-            lng: answer.lng,
+            lat,
+            lng,
             level: answer.level,
-            radiusKm: answer.distancePreference === "near" ? 12 : 20,
+            radiusKm: 20,
+            limit: 45,
           })
         : undefined;
     const result = await saveSurveyAnswer(
       answer,
-      liveResult?.schools,
-      liveResult?.source,
+      hasLocation ? (liveResult?.schools ?? []) : undefined,
+      liveResult?.source ?? (hasLocation ? "kakao-neis" : undefined),
     );
 
     return Response.json({
       id: result.id,
       recommendations: result.recommendations,
-      source: liveResult?.source ?? "seed",
+      source: result.source,
     });
   } catch (error) {
     return Response.json(

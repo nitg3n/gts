@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Scale } from "lucide-react";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { CompareButton } from "@/components/CompareButton";
 import { SchoolCard } from "@/components/SchoolCard";
 import type { StoredSurveyResponse } from "@/lib/types";
 import { formatDistance } from "@/lib/utils";
@@ -16,7 +17,7 @@ export function ResultsView({ responseId }: { responseId: string }) {
       .then((response) => response.json())
       .then((data: StoredSurveyResponse) => {
         setResult(data);
-        setStatus(getResultStatus(data));
+        setStatus("추천 결과");
       })
       .catch(() => setStatus("추천 결과를 불러오지 못했습니다."));
   }, [responseId]);
@@ -34,7 +35,21 @@ export function ResultsView({ responseId }: { responseId: string }) {
 
   const topThree = result.recommendations.slice(0, 3);
   const first = topThree[0];
-  const compareIds = topThree.map((item) => item.school.id).join(",");
+  const compareSchools = topThree.map((item) => item.school);
+  const topThreeIds = new Set(topThree.map((item) => item.school.id));
+  const expandedRecommendations = result.recommendations
+    .filter(
+      (recommendation) =>
+        recommendation.matchType === "expanded" &&
+        !topThreeIds.has(recommendation.school.id),
+    )
+    .sort(
+      (a, b) =>
+        (b.semanticScore ?? b.score) - (a.semanticScore ?? a.score) ||
+        (a.distanceKm ?? Number.POSITIVE_INFINITY) -
+          (b.distanceKm ?? Number.POSITIVE_INFINITY),
+    )
+    .slice(0, 3);
 
   return (
     <div className="apple-page">
@@ -68,13 +83,13 @@ export function ResultsView({ responseId }: { responseId: string }) {
                 {first.reasons[0]}
               </p>
             ) : null}
-            <Link
-              href={`/compare?ids=${compareIds}`}
-              className="mt-6 inline-flex h-11 items-center gap-2 rounded-full bg-white px-4 text-sm font-black text-[#1d1d1f] transition hover:bg-[var(--brand-primary-soft)]"
+            <CompareButton
+              schools={compareSchools}
+              navigateOnAdd
+              className="mt-6 border-0 bg-white text-[#1d1d1f] hover:bg-[var(--brand-primary-soft)]"
             >
               상위 학교 비교
-              <Scale className="h-4 w-4" aria-hidden />
-            </Link>
+            </CompareButton>
           </div>
         </div>
       </section>
@@ -86,10 +101,39 @@ export function ResultsView({ responseId }: { responseId: string }) {
               key={recommendation.school.id}
               school={recommendation.school}
               distanceKm={recommendation.distanceKm}
-              reason={recommendation.reasons[0]}
+              reasons={recommendation.reasons}
+              caution={recommendation.caution}
             />
           ))}
         </div>
+
+        {expandedRecommendations.length ? (
+          <section className="mt-10">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="apple-eyebrow">더 넓게 보기</p>
+                <h2 className="mt-2 text-2xl font-black tracking-tight text-[#1d1d1f]">
+                  조금 멀어도 조건이 강한 후보.
+                </h2>
+              </div>
+              <p className="max-w-xl text-sm font-semibold leading-6 text-[#6e6e73]">
+                통학 거리는 따로 확인하되, 설문 응답과 학교 성격이 잘 맞는
+                학교입니다.
+              </p>
+            </div>
+            <div className="grid gap-5 lg:grid-cols-3">
+              {expandedRecommendations.map((recommendation) => (
+                <SchoolCard
+                  key={recommendation.school.id}
+                  school={recommendation.school}
+                  distanceKm={recommendation.distanceKm}
+                  reasons={recommendation.reasons}
+                  caution={recommendation.caution}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <div className="apple-panel mt-8 overflow-hidden">
           <div className="grid grid-cols-[64px_1fr_96px] border-b border-[var(--line)] bg-white/48 px-4 py-3 text-xs font-black text-[#86868b] sm:grid-cols-[80px_1fr_140px]">
@@ -148,20 +192,4 @@ function distanceLabel(value: StoredSurveyResponse["answer"]["distancePreference
     return "상관없음";
   }
   return "균형";
-}
-
-function getResultStatus(result: StoredSurveyResponse) {
-  if (result.id === "demo") {
-    return "샘플 추천 결과";
-  }
-
-  if (result.source === "kakao-neis") {
-    return "실제 위치와 NEIS 기본정보 기반 추천 결과";
-  }
-
-  if (result.source === "kakao") {
-    return "실제 위치 기반 추천 결과";
-  }
-
-  return "설문 기반 추천 결과";
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapPinned } from "lucide-react";
-import type { PublicRuntimeConfig, School } from "@/lib/types";
+import type { School } from "@/lib/types";
 
 type KakaoLatLng = {
   getLat: () => number;
@@ -52,6 +52,8 @@ declare global {
 
 let kakaoScriptPromise: Promise<void> | undefined;
 const DEFAULT_MAP_LEVEL = 5;
+const kakaoJsKey = process.env.NEXT_PUBLIC_KAKAO_JS_KEY ?? "";
+const initialMapStatus = kakaoJsKey ? "loading" : "missing";
 
 export function KakaoMap({
   schools,
@@ -67,29 +69,25 @@ export function KakaoMap({
   onCenterChange?: (center: { lat: number; lng: number }) => void;
 }) {
   const mapRef = useRef<HTMLDivElement>(null);
-  const [config, setConfig] = useState<PublicRuntimeConfig>();
   const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">(
-    "loading",
+    initialMapStatus,
   );
 
-  useEffect(() => {
-    fetch("/api/config")
-      .then((response) => response.json())
-      .then((runtimeConfig: PublicRuntimeConfig) => setConfig(runtimeConfig))
-      .catch(() => setStatus("error"));
-  }, []);
-
   const markerSchools = useMemo(() => schools.slice(0, 10), [schools]);
-  const displayStatus = config && !config.kakaoJsKey ? "missing" : status;
+  const displayStatus = status;
 
   useEffect(() => {
-    if (!config?.kakaoJsKey || !mapRef.current) {
+    if (!kakaoJsKey) {
+      return;
+    }
+
+    if (!mapRef.current) {
       return;
     }
 
     const container = mapRef.current;
 
-    loadKakao(config.kakaoJsKey)
+    loadKakao(kakaoJsKey)
       .then(() => {
         const kakao = window.kakao;
         if (!kakao) {
@@ -166,7 +164,6 @@ export function KakaoMap({
     center.lat,
     center.lng,
     centerMarkerLabel,
-    config,
     markerSchools,
     onCenterChange,
   ]);
@@ -181,7 +178,6 @@ export function KakaoMap({
           displayStatus === "ready" ? "opacity-100" : "opacity-0"
         }`}
       />
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-20 bg-gradient-to-b from-black/10 to-transparent" />
       {displayStatus === "ready" && centerMarkerLabel && onCenterChange ? (
         <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center">
           <div className="-mt-10 flex flex-col items-center">
@@ -211,7 +207,15 @@ function loadKakao(appKey: string) {
   if (!kakaoScriptPromise) {
     kakaoScriptPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&autoload=false&libraries=services`;
+      const url = new URL("https://dapi.kakao.com/v2/maps/sdk.js");
+      url.search = new URLSearchParams({
+        appkey: appKey,
+        autoload: "false",
+        libraries: "services",
+      }).toString();
+
+      script.src = url.toString();
+      script.dataset.kakaoMapsSdk = "true";
       script.async = true;
       script.onload = () => resolve();
       script.onerror = () => reject(new Error("Kakao Maps SDK failed to load"));
@@ -241,7 +245,7 @@ function KakaoMapStatus({
         <p className="mt-3 max-w-md text-sm font-semibold leading-6 text-[#6e6e73]">
           {isLoading
             ? "잠시만 기다려주세요."
-            : "카카오 개발자 설정에서 현재 도메인을 확인해주세요."}
+            : "잠시 후 다시 시도해주세요."}
         </p>
       </div>
     </div>

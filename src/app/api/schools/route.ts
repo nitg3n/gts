@@ -1,5 +1,4 @@
 import { fetchNearbyLiveSchools } from "@/lib/live-schools";
-import { filterSchools } from "@/lib/schools";
 import { cacheSchools } from "@/lib/store";
 import type { SchoolLevel } from "@/lib/types";
 import { distanceKm } from "@/lib/utils";
@@ -38,43 +37,15 @@ export async function GET(request: Request) {
       schools: [],
       source: "none",
       usedRadiusKm: radiusKm,
-      message: "현재 위치 주변의 실제 학교 후보를 찾지 못했습니다.",
+      message: "현재 위치 주변의 학교 후보를 찾지 못했습니다.",
     });
   }
 
-  const schools = filterSchools(level)
-    .map((school) => {
-      const distance =
-        typeof lat === "number" && typeof lng === "number"
-          ? distanceKm({ lat, lng }, school)
-          : undefined;
-
-      return {
-        ...school,
-        distanceKm: distance,
-      };
-    })
-    .filter((school) => {
-      if (typeof radiusKm !== "number" || typeof school.distanceKm !== "number") {
-        return true;
-      }
-
-      return school.distanceKm <= radiusKm;
-    })
-    .sort((a, b) => {
-      if (typeof a.distanceKm !== "number" || typeof b.distanceKm !== "number") {
-        return a.name.localeCompare(b.name, "ko");
-      }
-
-      return a.distanceKm - b.distanceKm;
-    });
-
-  cacheSchools(schools);
-
   return Response.json({
-    schools,
-    source: "seed",
+    schools: [],
+    source: "none",
     usedRadiusKm: radiusKm,
+    message: "위치를 선택하면 공식 데이터가 확인된 주변 학교를 찾습니다.",
   });
 }
 

@@ -2,58 +2,67 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { LocateFixed, Search, SlidersHorizontal } from "lucide-react";
+import {
+  ArrowRight,
+  LocateFixed,
+  MapPinned,
+  Search,
+  SlidersHorizontal,
+} from "lucide-react";
 import { KakaoMap } from "@/components/KakaoMap";
 import { SchoolCard } from "@/components/SchoolCard";
 import { SEOUL_CENTER } from "@/lib/schools";
-import type { School, SchoolDataSource, SchoolLevel } from "@/lib/types";
+import type { School, SchoolLevel } from "@/lib/types";
 import {
   getStoredUserLocation,
   saveUserLocation,
   storedLocationLabel,
 } from "@/lib/user-location";
-import { cn } from "@/lib/utils";
+import { cn, formatDistance } from "@/lib/utils";
 
 type SchoolWithDistance = School & { distanceKm?: number };
 type SchoolSearchResponse = {
   schools: SchoolWithDistance[];
-  source?: SchoolDataSource | "none";
   usedRadiusKm?: number;
   message?: string;
 };
 
 type LocationState = "checking" | "picking" | "ready" | "needs-action";
 
-const levelFilters: Array<{ label: string; value: SchoolLevel | "all" }> = [
-  { label: "전체", value: "all" },
+const levelFilters: Array<{ label: string; value: SchoolLevel }> = [
   { label: "중학교", value: "middle" },
   { label: "고등학교", value: "high" },
 ];
 
 export function HomeExplorer() {
   const [schools, setSchools] = useState<SchoolWithDistance[]>([]);
-  const [level, setLevel] = useState<SchoolLevel | "all">("all");
+  const [level, setLevel] = useState<SchoolLevel>("high");
   const [center, setCenter] = useState(SEOUL_CENTER);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("현재 위치를 확인하는 중");
-  const [locationState, setLocationState] = useState<LocationState>("checking");
+  const [status, setStatus] = useState("위치 조정을 눌러 주변 학교를 찾으세요.");
+  const [locationState, setLocationState] =
+    useState<LocationState>("needs-action");
   const [draftLocation, setDraftLocation] = useState<{ lat: number; lng: number }>();
   const [draftAccuracy, setDraftAccuracy] = useState<number>();
 
+  const levelSchools = useMemo(
+    () => schools.filter((school) => school.level === level),
+    [level, schools],
+  );
+  const rankedSchools = useMemo(() => levelSchools.slice(0, 3), [levelSchools]);
   const visibleSchools = useMemo(() => {
     const keyword = query.trim();
 
-    return schools.filter((school) => {
-      const matchesLevel = level === "all" || school.level === level;
+    return levelSchools.filter((school) => {
       const matchesQuery =
         keyword.length === 0 ||
         school.name.includes(keyword) ||
         school.tags.some((tag) => tag.includes(keyword)) ||
         school.district.includes(keyword);
 
-      return matchesLevel && matchesQuery;
+      return matchesQuery;
     });
-  }, [level, query, schools]);
+  }, [levelSchools, query]);
 
   const loadSchoolsForLocation = useCallback(
     async (nextCenter: { lat: number; lng: number }, locationLabel: string) => {
@@ -80,7 +89,7 @@ export function HomeExplorer() {
 
         setSchools(data.schools);
         setLocationState("ready");
-        setStatus(`${getSourceLabel(data.source)} · ${locationLabel}`);
+        setStatus(`${locationLabel} 주변 학교`);
       } catch {
         setSchools([]);
         setLocationState("needs-action");
@@ -114,10 +123,14 @@ export function HomeExplorer() {
         setLocationState("picking");
         setStatus("지도에서 위치를 선택해주세요.");
       },
-      () => {
+      (error) => {
         setSchools([]);
         setLocationState("needs-action");
-        setStatus("위치 권한이 필요합니다.");
+        setStatus(
+          error.code === error.PERMISSION_DENIED
+            ? "브라우저 위치 권한을 허용한 뒤 다시 눌러주세요."
+            : "위치를 다시 확인해주세요.",
+        );
       },
       { enableHighAccuracy: true, timeout: 8000 },
     );
@@ -145,63 +158,64 @@ export function HomeExplorer() {
         return;
       }
 
-      void refreshWithLocation();
+      setSchools([]);
+      setLocationState("needs-action");
+      setStatus("위치 조정을 눌러 주변 학교를 찾으세요.");
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, [loadSchoolsForLocation, refreshWithLocation]);
+  }, [loadSchoolsForLocation]);
 
   return (
     <div className="apple-page">
       <section className="apple-section">
-        <div className="apple-shell grid gap-10 py-12 lg:grid-cols-[minmax(0,1fr)_minmax(420px,480px)] lg:py-16">
-          <div className="flex min-h-[420px] flex-col justify-center">
-            <div>
-              <h1 className="apple-title max-w-3xl text-6xl leading-[0.96] sm:text-7xl">
-                학교로GO
-              </h1>
-              <p className="apple-copy mt-6 max-w-2xl text-xl">
-                내게 맞는 학교로 가는 길.
-              </p>
-
-              <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-                <Link
-                  href="/survey"
-                  className="apple-button-primary h-12 gap-2 px-5 text-sm"
-                >
-                  <SlidersHorizontal className="h-4 w-4" aria-hidden />
-                  설문 시작
-                </Link>
-                {locationState === "ready" ? (
-                  <button
-                    type="button"
-                    onClick={refreshWithLocation}
-                    className="apple-button-secondary h-12 gap-2 px-5 text-sm"
-                  >
-                    <LocateFixed className="h-4 w-4" aria-hidden />
-                    위치 변경
-                  </button>
-                ) : null}
-              </div>
-            </div>
+        <div className="apple-shell grid max-w-[96rem] gap-6 py-10 lg:min-h-[620px] lg:grid-cols-[250px_minmax(480px,680px)_minmax(360px,500px)] lg:items-center lg:gap-8 xl:gap-10">
+          <div className="flex flex-col justify-center">
+            <h1 className="apple-title text-5xl leading-none sm:text-[3.25rem]">
+              학교로GO
+            </h1>
+            <p className="apple-copy mt-5 text-xl leading-8">
+              내게 맞는 학교로 가는 길.
+            </p>
+            <Link
+              href="/survey"
+              className="apple-button-primary mt-12 h-14 w-fit gap-2 px-8 text-lg"
+            >
+              <SlidersHorizontal className="h-4 w-4" aria-hidden />
+              설문 시작
+            </Link>
           </div>
 
-          <div>
-            {locationState === "ready" ? (
-              <KakaoMap schools={visibleSchools} center={center} />
-            ) : locationState === "picking" && draftLocation ? (
-              <LocationPicker
-                location={draftLocation}
-                onChange={setDraftLocation}
-                onConfirm={confirmDraftLocation}
-              />
-            ) : (
-              <LocationPrompt
-                status={status}
-                canRetry={locationState === "needs-action"}
-                onRetry={refreshWithLocation}
-              />
-            )}
+          <div className="flex flex-col gap-3">
+            <MainMapStage
+              locationState={locationState}
+              center={center}
+              draftLocation={draftLocation}
+              schools={levelSchools}
+              status={status}
+              onDraftChange={setDraftLocation}
+            />
+            <button
+              type="button"
+              onClick={
+                locationState === "picking"
+                  ? confirmDraftLocation
+                  : refreshWithLocation
+              }
+              className="apple-button-secondary h-14 gap-2 px-5 text-lg"
+            >
+              <LocateFixed className="h-4 w-4" aria-hidden />
+              {locationState === "picking" ? "위치 선택" : "위치 조정"}
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <LocationRankList
+              schools={rankedSchools}
+              isReady={locationState === "ready"}
+              level={level}
+            />
+            <LevelSwitcher value={level} onChange={setLevel} />
           </div>
         </div>
       </section>
@@ -214,7 +228,9 @@ export function HomeExplorer() {
                 {status}
               </p>
               <div className="mt-2 flex flex-wrap items-end gap-3">
-                <h2 className="apple-title text-3xl">주변 학교</h2>
+                <h2 className="apple-title text-3xl">
+                  {level === "middle" ? "중학교" : "고등학교"} 목록
+                </h2>
                 {visibleSchools.length > 0 ? (
                   <span className="pb-1 text-sm font-black text-[#86868b]">
                     {visibleSchools.length}곳
@@ -233,23 +249,6 @@ export function HomeExplorer() {
                   className="apple-field h-11 w-full pl-10 pr-4 text-sm sm:w-72"
                 />
               </label>
-              <div className="flex rounded-full border border-[var(--line-strong)] bg-white/78 p-1">
-                {levelFilters.map((item) => (
-                  <button
-                    type="button"
-                    key={item.value}
-                    onClick={() => setLevel(item.value)}
-                    className={cn(
-                      "h-9 rounded-full px-3 text-sm font-black transition",
-                      level === item.value
-                        ? "bg-[#1d1d1f] text-white shadow-sm"
-                        : "text-[#6e6e73] hover:bg-[var(--brand-primary-soft)] hover:text-[#1d1d1f]",
-                    )}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
 
@@ -274,32 +273,160 @@ export function HomeExplorer() {
   );
 }
 
-function LocationPicker({
-  location,
-  onChange,
-  onConfirm,
+function MainMapStage({
+  locationState,
+  center,
+  draftLocation,
+  schools,
+  status,
+  onDraftChange,
 }: {
-  location: { lat: number; lng: number };
-  onChange: (location: { lat: number; lng: number }) => void;
-  onConfirm: () => void;
+  locationState: LocationState;
+  center: { lat: number; lng: number };
+  draftLocation?: { lat: number; lng: number };
+  schools: School[];
+  status: string;
+  onDraftChange: (location: { lat: number; lng: number }) => void;
 }) {
-  return (
-    <div className="apple-panel p-3">
+  if (locationState === "ready") {
+    return (
+      <KakaoMap
+        schools={schools}
+        center={center}
+        className="h-[360px] min-h-0 lg:h-[400px]"
+      />
+    );
+  }
+
+  if (locationState === "picking" && draftLocation) {
+    return (
       <KakaoMap
         schools={[]}
-        center={location}
+        center={draftLocation}
         centerMarkerLabel="선택할 위치"
-        className="min-h-[340px] border-0 shadow-none"
-        onCenterChange={onChange}
+        className="h-[360px] min-h-0 lg:h-[400px]"
+        onCenterChange={onDraftChange}
       />
-      <button
-        type="button"
-        onClick={onConfirm}
-        className="apple-button-primary mt-3 h-11 w-full gap-2 text-sm"
-      >
-        <LocateFixed className="h-4 w-4" aria-hidden />
-        위치 선택
-      </button>
+    );
+  }
+
+  return <MapPlaceholder status={status} isChecking={locationState === "checking"} />;
+}
+
+function MapPlaceholder({
+  status,
+  isChecking,
+}: {
+  status: string;
+  isChecking: boolean;
+}) {
+  return (
+    <div className="relative grid h-[360px] min-h-0 place-items-center overflow-hidden rounded-[26px] border border-[var(--line)] bg-[#eef1ec] p-8 text-center shadow-[0_18px_48px_rgba(29,29,31,0.08)] lg:h-[400px]">
+      <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/5 to-transparent" />
+      <div className="relative">
+        <div className="apple-icon-bubble mx-auto h-12 w-12">
+          <MapPinned className="h-5 w-5" aria-hidden />
+        </div>
+        <p className="apple-eyebrow mt-4">Map</p>
+        <h2 className="mt-2 text-2xl font-black tracking-tight text-[#1d1d1f]">
+          {isChecking ? "위치 확인 중" : "맵"}
+        </h2>
+        <p className="mx-auto mt-3 max-w-sm text-sm font-semibold leading-6 text-[#6e6e73]">
+          {status}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LocationRankList({
+  schools,
+  isReady,
+  level,
+}: {
+  schools: SchoolWithDistance[];
+  isReady: boolean;
+  level: SchoolLevel;
+}) {
+  const placeholders = [1, 2, 3];
+
+  return (
+    <div>
+      <p className="mb-4 pl-2 text-lg font-black text-[var(--brand-primary)]">
+        주변 학교 정보
+      </p>
+      <div className="grid gap-4">
+        {placeholders.map((rank) => {
+          const school = schools[rank - 1];
+
+          if (!isReady || !school) {
+            return (
+              <div
+                key={rank}
+                className="flex h-24 flex-col justify-center rounded-[24px] border border-[var(--line)] bg-white/78 px-7 shadow-[0_10px_28px_rgba(29,29,31,0.045)]"
+              >
+                <span className="text-base font-black text-[var(--brand-primary)]">
+                  {getLevelLabel(level)} {rank}
+                </span>
+                <span className="mt-2 text-xl font-black text-[#86868b]">
+                  위치 조정 후 표시
+                </span>
+              </div>
+            );
+          }
+
+          return (
+            <Link
+              key={school.id}
+              href={`/schools/${school.id}`}
+              className="group flex h-24 items-center justify-between gap-4 rounded-[24px] border border-[var(--line)] bg-white/92 px-7 shadow-[0_10px_28px_rgba(29,29,31,0.05)] transition hover:border-[rgba(70,138,87,0.36)] hover:bg-[var(--brand-primary-soft)]"
+            >
+              <span className="min-w-0">
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="text-sm font-black text-[var(--brand-primary)]">
+                    선택된 위치로부터 {formatDistance(school.distanceKm)}
+                  </span>
+                </span>
+                <span className="mt-1 block truncate text-3xl font-black leading-tight text-[#1d1d1f]">
+                  {school.name}
+                </span>
+              </span>
+              <ArrowRight
+                className="h-5 w-5 shrink-0 text-[#86868b] transition group-hover:translate-x-0.5 group-hover:text-[var(--brand-primary)]"
+                aria-hidden
+              />
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LevelSwitcher({
+  value,
+  onChange,
+}: {
+  value: SchoolLevel;
+  onChange: (level: SchoolLevel) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      {levelFilters.map((item) => (
+        <button
+          type="button"
+          key={item.value}
+          onClick={() => onChange(item.value)}
+          className={cn(
+            "h-14 rounded-[22px] border px-4 text-2xl font-black transition",
+            value === item.value
+              ? "border-[var(--brand-primary)] bg-[var(--brand-primary)] text-white shadow-[0_14px_34px_rgba(70,138,87,0.2)]"
+              : "border-[var(--line-strong)] bg-white/78 text-[#1d1d1f] hover:border-[rgba(70,138,87,0.42)] hover:bg-[var(--brand-primary-soft)]",
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -317,50 +444,6 @@ function EmptyCandidateState() {
   );
 }
 
-function LocationPrompt({
-  status,
-  canRetry,
-  onRetry,
-}: {
-  status: string;
-  canRetry: boolean;
-  onRetry: () => void;
-}) {
-  return (
-    <div className="apple-panel grid min-h-[420px] place-items-center p-8 text-center">
-      <div>
-        <div className="apple-icon-bubble mx-auto h-12 w-12">
-          <LocateFixed className="h-5 w-5" aria-hidden />
-        </div>
-        <h2 className="mt-4 text-2xl font-black tracking-tight text-[#1d1d1f]">
-          {canRetry ? "위치가 필요해요" : "위치 확인 중"}
-        </h2>
-        <p className="mt-3 max-w-md text-sm font-semibold leading-6 text-[#6e6e73]">
-          {status}
-        </p>
-        {canRetry ? (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="apple-button-primary mt-5 h-11 gap-2 px-4 text-sm"
-          >
-            <LocateFixed className="h-4 w-4" aria-hidden />
-            위치 확인
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function getSourceLabel(source?: SchoolDataSource | "none") {
-  if (source === "kakao-neis") {
-    return "실제 학교 정보 반영";
-  }
-
-  if (source === "kakao") {
-    return "현재 위치 기준";
-  }
-
-  return "주변 학교";
+function getLevelLabel(level: SchoolLevel) {
+  return level === "middle" ? "중학교" : "고등학교";
 }

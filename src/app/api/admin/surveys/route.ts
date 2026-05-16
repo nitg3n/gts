@@ -18,6 +18,7 @@ const surveySchema = z.object({
     z.object({
       id: z.string().min(1),
       type: z.enum(["hidden", "section", "single", "multi", "scale"]),
+      step: z.enum(["profile", "fit", "priorities", "commute"]).optional(),
       title: z.string().min(1),
       description: z.string().optional(),
       required: z.boolean().optional(),
@@ -93,12 +94,17 @@ export async function PATCH(request: Request) {
       activeSurveyId: await getActiveSurveyId(),
     });
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const persistenceFailed = detail.includes("Supabase");
+
     return Response.json(
       {
-        message: "설문 저장값을 확인해주세요.",
-        detail: error instanceof Error ? error.message : String(error),
+        message: persistenceFailed
+          ? "설문 저장소에 저장하지 못했습니다."
+          : "설문 저장값을 확인해주세요.",
+        detail,
       },
-      { status: 400 },
+      { status: persistenceFailed ? 500 : 400 },
     );
   }
 }

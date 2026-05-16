@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "학교로GO",
-  description: "학생에게 맞는 학교 선택을 돕는 데이터 기반 추천 서비스",
+  description: "학생에게 맞는 학교 선택을 돕는 추천 서비스",
   icons: {
     icon: [{ url: "/logo-black.svg", type: "image/svg+xml" }],
     shortcut: [{ url: "/logo-black.svg", type: "image/svg+xml" }],

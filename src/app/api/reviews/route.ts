@@ -20,7 +20,13 @@ const reviewSchema = z.object({
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const schoolId = url.searchParams.get("schoolId") ?? undefined;
-  const status = url.searchParams.get("status") === "pending" ? "pending" : "approved";
+  const statusParam = url.searchParams.get("status");
+  const status =
+    statusParam === "pending" ||
+    statusParam === "approved" ||
+    statusParam === "rejected"
+      ? statusParam
+      : undefined;
 
   return Response.json({
     reviews: await listReviews(schoolId, status),

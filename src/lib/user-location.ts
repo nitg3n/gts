@@ -70,20 +70,20 @@ export function storedLocationLabel(location: StoredUserLocation) {
   const savedAt = Date.parse(location.savedAt);
 
   if (!Number.isFinite(savedAt)) {
-    return "저장된 위치";
+    return "선택한 위치";
   }
 
   const minutes = Math.max(1, Math.round((Date.now() - savedAt) / 60000));
 
   if (minutes < 60) {
-    return `${minutes}분 전 저장된 위치`;
+    return "최근 선택한 위치";
   }
 
   const hours = Math.round(minutes / 60);
 
   if (hours < 24) {
-    return `${hours}시간 전 저장된 위치`;
+    return "오늘 선택한 위치";
   }
 
-  return `${Math.round(hours / 24)}일 전 저장된 위치`;
+  return "선택한 위치";
 }
