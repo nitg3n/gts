@@ -54,6 +54,7 @@ let kakaoScriptPromise: Promise<void> | undefined;
 const DEFAULT_MAP_LEVEL = 5;
 const kakaoJsKey = process.env.NEXT_PUBLIC_KAKAO_JS_KEY ?? "";
 const initialMapStatus = kakaoJsKey ? "loading" : "missing";
+const KAKAO_LOG_PREFIX = "[gts:kakao-map]";
 
 export function KakaoMap({
   schools,
@@ -78,10 +79,17 @@ export function KakaoMap({
 
   useEffect(() => {
     if (!kakaoJsKey) {
+      logKakaoMapIssue("missing NEXT_PUBLIC_KAKAO_JS_KEY", {
+        origin: getWindowOrigin(),
+        expectedEnv: "NEXT_PUBLIC_KAKAO_JS_KEY",
+      });
       return;
     }
 
     if (!mapRef.current) {
+      logKakaoMapIssue("map container is not mounted yet", {
+        origin: getWindowOrigin(),
+      });
       return;
     }
 
@@ -91,75 +99,95 @@ export function KakaoMap({
       .then(() => {
         const kakao = window.kakao;
         if (!kakao) {
+          logKakaoMapIssue("Kakao SDK script loaded but window.kakao is missing", {
+            origin: getWindowOrigin(),
+          });
           setStatus("error");
           return;
         }
 
         kakao.maps.load(() => {
-          const map = new kakao.maps.Map(container, {
-            center: new kakao.maps.LatLng(center.lat, center.lng),
-            draggable: true,
-            level: DEFAULT_MAP_LEVEL,
-            scrollwheel: true,
-          });
-          const bounds = new kakao.maps.LatLngBounds();
-          let activeInfoWindow: { close: () => void } | undefined;
+          try {
+            const map = new kakao.maps.Map(container, {
+              center: new kakao.maps.LatLng(center.lat, center.lng),
+              draggable: true,
+              level: DEFAULT_MAP_LEVEL,
+              scrollwheel: true,
+            });
+            const bounds = new kakao.maps.LatLngBounds();
+            let activeInfoWindow: { close: () => void } | undefined;
 
-          map.setDraggable?.(true);
-          map.setZoomable?.(true);
-          map.addControl?.(
-            new kakao.maps.MapTypeControl(),
-            kakao.maps.ControlPosition.TOPRIGHT,
-          );
-          map.addControl?.(
-            new kakao.maps.ZoomControl(),
-            kakao.maps.ControlPosition.RIGHT,
-          );
+            map.setDraggable?.(true);
+            map.setZoomable?.(true);
+            map.addControl?.(
+              new kakao.maps.MapTypeControl(),
+              kakao.maps.ControlPosition.TOPRIGHT,
+            );
+            map.addControl?.(
+              new kakao.maps.ZoomControl(),
+              kakao.maps.ControlPosition.RIGHT,
+            );
 
-          markerSchools.forEach((school) => {
-            const position = new kakao.maps.LatLng(school.lat, school.lng);
-            const marker = new kakao.maps.Marker({ position });
-            marker.setMap(map);
-            bounds.extend(position);
+            markerSchools.forEach((school) => {
+              const position = new kakao.maps.LatLng(school.lat, school.lng);
+              const marker = new kakao.maps.Marker({ position });
+              marker.setMap(map);
+              bounds.extend(position);
 
-            const info = new kakao.maps.InfoWindow({
-              content: `<div style="padding:10px 12px;font-size:12px;font-weight:800;color:#1d1d1f;white-space:nowrap;">${escapeHtml(school.name)}</div>`,
+              const info = new kakao.maps.InfoWindow({
+                content: `<div style="padding:10px 12px;font-size:12px;font-weight:800;color:#1d1d1f;white-space:nowrap;">${escapeHtml(school.name)}</div>`,
+              });
+
+              kakao.maps.event.addListener(marker, "click", () => {
+                activeInfoWindow?.close();
+                info.open(map, marker);
+                activeInfoWindow = info;
+              });
             });
 
-            kakao.maps.event.addListener(marker, "click", () => {
-              activeInfoWindow?.close();
+            if (centerMarkerLabel && !onCenterChange) {
+              const position = new kakao.maps.LatLng(center.lat, center.lng);
+              const marker = new kakao.maps.Marker({ position });
+              marker.setMap(map);
+
+              const info = new kakao.maps.InfoWindow({
+                content: `<div style="padding:10px 12px;font-size:12px;font-weight:800;color:#1d1d1f;white-space:nowrap;">${escapeHtml(centerMarkerLabel)}</div>`,
+              });
               info.open(map, marker);
-              activeInfoWindow = info;
-            });
-          });
+            }
 
-          if (centerMarkerLabel && !onCenterChange) {
-            const position = new kakao.maps.LatLng(center.lat, center.lng);
-            const marker = new kakao.maps.Marker({ position });
-            marker.setMap(map);
+            if (onCenterChange) {
+              kakao.maps.event.addListener(map, "dragend", () => {
+                const nextCenter = map.getCenter?.();
+                const lat = nextCenter?.getLat();
+                const lng = nextCenter?.getLng();
 
-            const info = new kakao.maps.InfoWindow({
-              content: `<div style="padding:10px 12px;font-size:12px;font-weight:800;color:#1d1d1f;white-space:nowrap;">${escapeHtml(centerMarkerLabel)}</div>`,
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                  onCenterChange({ lat: lat!, lng: lng! });
+                }
+              });
+            }
+
+            setStatus("ready");
+          } catch (error) {
+            logKakaoMapIssue("Kakao map initialization failed", {
+              centerLat: center.lat,
+              centerLng: center.lng,
+              markerCount: markerSchools.length,
+              origin: getWindowOrigin(),
+              error,
             });
-            info.open(map, marker);
+            setStatus("error");
           }
-
-          if (onCenterChange) {
-            kakao.maps.event.addListener(map, "dragend", () => {
-              const nextCenter = map.getCenter?.();
-              const lat = nextCenter?.getLat();
-              const lng = nextCenter?.getLng();
-
-              if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                onCenterChange({ lat: lat!, lng: lng! });
-              }
-            });
-          }
-
-          setStatus("ready");
         });
       })
-      .catch(() => setStatus("error"));
+      .catch((error) => {
+        logKakaoMapIssue("Kakao SDK script failed to load", {
+          origin: getWindowOrigin(),
+          error,
+        });
+        setStatus("error");
+      });
   }, [
     center.lat,
     center.lng,
@@ -201,6 +229,9 @@ function loadKakao(appKey: string) {
   }
 
   if (window.kakao?.maps) {
+    console.info(`${KAKAO_LOG_PREFIX} SDK already loaded`, {
+      origin: getWindowOrigin(),
+    });
     return Promise.resolve();
   }
 
@@ -217,13 +248,48 @@ function loadKakao(appKey: string) {
       script.src = url.toString();
       script.dataset.kakaoMapsSdk = "true";
       script.async = true;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error("Kakao Maps SDK failed to load"));
+      script.onload = () => {
+        console.info(`${KAKAO_LOG_PREFIX} SDK script loaded`, {
+          origin: getWindowOrigin(),
+          scriptUrl: maskKakaoAppKey(url.toString()),
+        });
+        resolve();
+      };
+      script.onerror = () => {
+        reject(
+          new Error(
+            `Kakao Maps SDK failed to load. Check Kakao JavaScript key and Web platform domain for ${getWindowOrigin()}.`,
+          ),
+        );
+      };
+      console.info(`${KAKAO_LOG_PREFIX} loading SDK script`, {
+        origin: getWindowOrigin(),
+        scriptUrl: maskKakaoAppKey(url.toString()),
+      });
       document.head.appendChild(script);
     });
   }
 
   return kakaoScriptPromise;
+}
+
+function logKakaoMapIssue(message: string, detail: Record<string, unknown>) {
+  console.error(`${KAKAO_LOG_PREFIX} ${message}`, detail);
+}
+
+function getWindowOrigin() {
+  if (typeof window === "undefined") {
+    return "server";
+  }
+
+  return window.location.origin;
+}
+
+function maskKakaoAppKey(value: string) {
+  return value.replace(/appkey=([^&]+)/, (_match, key: string) => {
+    const visible = key.length > 6 ? `${key.slice(0, 3)}...${key.slice(-3)}` : "***";
+    return `appkey=${visible}`;
+  });
 }
 
 function KakaoMapStatus({
