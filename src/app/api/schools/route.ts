@@ -2,6 +2,8 @@ import { fetchNearbyLiveSchools } from "@/lib/live-schools";
 import { cacheSchools } from "@/lib/store";
 import { distanceKm } from "@/lib/utils";
 
+export const runtime = "nodejs";
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const level = "high";
@@ -10,6 +12,17 @@ export async function GET(request: Request) {
   const radiusKm = parseNumber(url.searchParams.get("radiusKm"));
 
   if (typeof lat === "number" && typeof lng === "number") {
+    if (!isValidCoordinate(lat, lng)) {
+      return Response.json(
+        {
+          schools: [],
+          source: "none",
+          message: "위치 좌표를 확인해주세요.",
+        },
+        { status: 400 },
+      );
+    }
+
     const liveResult = await fetchNearbyLiveSchools({
       lat,
       lng,
@@ -59,4 +72,8 @@ function parseNumber(value: string | null) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isValidCoordinate(lat: number, lng: number) {
+  return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }

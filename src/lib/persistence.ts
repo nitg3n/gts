@@ -43,11 +43,7 @@ function getPool() {
 }
 
 function getPersistentDatabaseUrl() {
-  return (
-    process.env.SUPABASE_DATABASE_URL ??
-    process.env.POSTGRES_URL ??
-    process.env.SUPABASE_DIRECT_CONNECTION_KEY
-  );
+  return process.env.SUPABASE_DATABASE_URL ?? process.env.POSTGRES_URL;
 }
 
 function ensureSchema(pool: Pool) {

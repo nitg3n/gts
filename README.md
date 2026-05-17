@@ -23,19 +23,12 @@ NEIS_OPEN_API_KEY=
 SCHOOL_INFO_OPEN_API_KEY=
 KAKAO_REST_API_KEY=
 NEXT_PUBLIC_KAKAO_JS_KEY=
-KAKAO_NATIVE_APP_KEY=
-KAKAO_ADMIN_KEY=
-SUPABASE_PROJECT_URL=
-SUPABASE_PUBLISHABLE_KEY=
-SUPABASE_DIRECT_CONNECTION_KEY=
-NEXT_PUBLIC_SUPABASE_PROJECT_URL=
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
-ADMIN_EMAILS=
+SUPABASE_DATABASE_URL=
 ```
 
 `NEXT_PUBLIC_KAKAO_JS_KEY`는 Kakao Maps JavaScript SDK 로딩에 사용됩니다. 브라우저에 노출되는 공개 키이므로 Kakao Developers에서 허용 도메인을 반드시 등록해야 합니다.
 
-`NEXT_PUBLIC_SUPABASE_PROJECT_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`는 브라우저에서 Supabase Auth를 초기화하는 공개 설정입니다. 서버 저장소와 관리자 검증에는 기존 `SUPABASE_*` 값을 함께 둡니다.
+`SUPABASE_DATABASE_URL`은 리뷰, 설문 응답, 추천 결과 저장에 사용하는 서버 전용 Postgres/Supabase pooler 연결 문자열입니다. 브라우저에 노출되는 `NEXT_PUBLIC_` 값으로 두지 않습니다.
 
 개발용 허용 도메인:
 

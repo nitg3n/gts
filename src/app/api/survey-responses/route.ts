@@ -14,8 +14,17 @@ import {
 } from "@/lib/survey-candidate-scope";
 import type { School, SurveyAnswer } from "@/lib/types";
 
+export const runtime = "nodejs";
+
 export async function POST(request: Request) {
   try {
+    if (isRequestBodyTooLarge(request, 64_000)) {
+      return Response.json(
+        { message: "설문 응답이 너무 큽니다." },
+        { status: 413 },
+      );
+    }
+
     const body = await request.json();
     const answer = surveyAnswerSchema.parse(body) as SurveyAnswer;
     const lat = answer.lat;
@@ -55,10 +64,7 @@ export async function POST(request: Request) {
     return Response.json(result);
   } catch (error) {
     return Response.json(
-      {
-        message: "설문 응답 형식이 올바르지 않습니다.",
-        detail: error instanceof Error ? error.message : String(error),
-      },
+      errorResponse("설문 응답 형식이 올바르지 않습니다.", error),
       { status: 400 },
     );
   }
@@ -128,4 +134,25 @@ function uniqueSchools(schools: School[]) {
     seen.add(school.id);
     return true;
   });
+}
+
+function isRequestBodyTooLarge(request: Request, maxBytes: number) {
+  const contentLength = request.headers.get("content-length");
+  if (!contentLength) {
+    return false;
+  }
+
+  const parsed = Number(contentLength);
+  return Number.isFinite(parsed) && parsed > maxBytes;
+}
+
+function errorResponse(message: string, error: unknown) {
+  if (process.env.NODE_ENV !== "production") {
+    return {
+      message,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  return { message };
 }

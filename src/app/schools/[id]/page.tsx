@@ -19,6 +19,8 @@ import { getPublicFactItems } from "@/lib/public-facts";
 import { getSchoolByRouteId, listReviews } from "@/lib/store";
 import type { SchoolDisclosureDetails } from "@/lib/types";
 
+export const runtime = "nodejs";
+
 export default async function SchoolPage({
   params,
 }: {

@@ -227,18 +227,7 @@ export async function getSurveyResult(id: string) {
     return normalized;
   }
 
-  const fallback = surveyAnswerSchema.parse({
-    distancePreference: "balanced",
-    priorities: ["activities", "environment", "academics"],
-    preferredTags: ["동아리", "상담"],
-  }) as SurveyAnswer;
-
-  return {
-    id: "demo",
-    answer: fallback,
-    createdAt: new Date().toISOString(),
-    recommendations: highSchoolRecommendations(rankSchools(fallback)),
-  };
+  return undefined;
 }
 
 function normalizeStoredSurveyResponse(
@@ -266,7 +255,7 @@ function highSchoolRecommendations(
 
 export async function listReviews(
   schoolId?: string,
-  status?: SchoolReview["status"],
+  status: SchoolReview["status"] = "approved",
 ) {
   const persistentReviews = await readPersistentReviews(schoolId, status);
 
