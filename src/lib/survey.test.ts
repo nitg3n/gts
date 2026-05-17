@@ -5,21 +5,18 @@ describe("deriveSurveyAnswer", () => {
   it("turns the cleaned survey defaults into a high-school recommendation answer", () => {
     const answer = deriveSurveyAnswer(getDefaultSurveyResponses());
 
-    expect(answer.level).toBe("high");
     expect(answer.distancePreference).toBe("balanced");
     expect(answer.priorities).toHaveLength(3);
-    expect(answer.rawResponses?.targetLevel).toBe("high");
+    expect(answer.studentGender).toBeUndefined();
   });
 
-  it("ignores stale targetLevel values for middle-school students", () => {
+  it("keeps the student's gender as a hard recommendation input", () => {
     const answer = deriveSurveyAnswer({
       ...getDefaultSurveyResponses(),
-      studentStage: "middle",
-      targetLevel: "middle",
+      studentGender: "female",
     });
 
-    expect(answer.studentStage).toBe("middle");
-    expect(answer.level).toBe("high");
+    expect(answer.studentGender).toBe("female");
   });
 
   it("maps strict commute answers to nearby-school preference", () => {
@@ -30,19 +27,6 @@ describe("deriveSurveyAnswer", () => {
     });
 
     expect(answer.distancePreference).toBe("near");
-  });
-
-  it("switches elementary students to middle-school recommendations", () => {
-    const answer = deriveSurveyAnswer({
-      ...getDefaultSurveyResponses(),
-      studentStage: "elementary",
-      targetLevel: "middle",
-      middleEnvironmentPreference: "activity",
-    });
-
-    expect(answer.studentStage).toBe("elementary");
-    expect(answer.level).toBe("middle");
-    expect(answer.preferredTags).toContain("동아리");
   });
 
   it("maps vocational preferences to practical activity tags", () => {
@@ -68,6 +52,17 @@ describe("deriveSurveyAnswer", () => {
     expect(answer.categoryPreference).toBe("과학고");
     expect(answer.preferredTags).toContain("과학");
     expect(answer.preferredTags).toContain("프로젝트");
+  });
+
+  it("keeps gifted-school preferences as a distinct high-school type", () => {
+    const answer = deriveSurveyAnswer({
+      ...getDefaultSurveyResponses(),
+      categoryPreference: "영재학교",
+    });
+
+    expect(answer.categoryPreference).toBe("영재학교");
+    expect(answer.preferredTags).toContain("영재");
+    expect(answer.preferredTags).toContain("과학");
   });
 
   it("uses transition concerns to strengthen commute and care signals", () => {

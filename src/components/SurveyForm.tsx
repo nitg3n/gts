@@ -22,7 +22,6 @@ import type {
 import {
   deriveSurveyAnswer,
   getDefaultSurveyResponses,
-  getStudentStage,
   getVisibleSurveyQuestions,
   type SurveyResponseMap,
   type SurveyResponseValue,
@@ -48,7 +47,7 @@ const stepMeta: Record<StepId, Omit<SurveyStep, "id" | "questions">> = {
   profile: {
     eyebrow: "1단계",
     title: "현재 상황",
-    description: "학생의 현재 학교급에 따라 추천 대상이 자동으로 정해집니다.",
+    description: "현재 학년과 고등학교 선택 기준을 확인합니다.",
   },
   fit: {
     eyebrow: "2단계",
@@ -85,14 +84,16 @@ export function SurveyForm() {
   const [submitting, setSubmitting] = useState(false);
   const [locationSource, setLocationSource] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
-  const studentStage = getStudentStage(responses);
-  const targetLabel = studentStage === "elementary" ? "중학교" : "고등학교";
+  const [touchedQuestions, setTouchedQuestions] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const targetLabel = "고등학교";
   const visibleQuestions = useMemo(
     () =>
-      getVisibleSurveyQuestions(survey, responses).filter(
+      getVisibleSurveyQuestions(survey).filter(
         (question) => question.type !== "hidden" && question.type !== "section",
       ),
-    [responses, survey],
+    [survey],
   );
   const steps = useMemo(
     () => buildSteps(visibleQuestions),
@@ -102,6 +103,7 @@ export function SurveyForm() {
   const activeStep = steps[safeStepIndex];
   const answeredCount =
     visibleQuestions.filter((question) =>
+      touchedQuestions.has(question.id) &&
       isAnswered(question, responses[question.id]),
     ).length + (location ? 1 : 0);
   const totalCount = visibleQuestions.length + 1;
@@ -117,6 +119,7 @@ export function SurveyForm() {
 
         setSurvey(data.survey);
         setResponses(getDefaultSurveyResponses(data.survey));
+        setTouchedQuestions(new Set());
       })
       .catch(() => setStatus("기본 설문으로 진행합니다."));
   }, []);
@@ -138,26 +141,15 @@ export function SurveyForm() {
   }, []);
 
   function setResponse(questionId: string, value: SurveyResponseValue) {
+    markQuestionTouched(questionId);
     setResponses((current) => ({
       ...current,
       [questionId]: value,
     }));
   }
 
-  function setStudentStage(stage: "elementary" | "middle") {
-    setResponses((current) => ({
-      ...current,
-      studentStage: stage,
-      targetLevel: stage === "elementary" ? "middle" : "high",
-    }));
-    setStatus(
-      stage === "elementary"
-        ? "초등학생 기준 중학교 추천 설문입니다."
-        : "중학생 기준 고등학교 추천 설문입니다.",
-    );
-  }
-
   function toggleMulti(questionId: string, value: string) {
+    markQuestionTouched(questionId);
     setResponses((current) => {
       const currentValues = Array.isArray(current[questionId])
         ? (current[questionId] as string[])
@@ -170,6 +162,26 @@ export function SurveyForm() {
         ...current,
         [questionId]: nextValues,
       };
+    });
+  }
+
+  function markQuestionTouched(questionId: string) {
+    setTouchedQuestions((current) => {
+      const next = new Set(current);
+      next.add(questionId);
+      return next;
+    });
+  }
+
+  function markStepTouched(step: SurveyStep | undefined) {
+    if (!step?.questions.length) {
+      return;
+    }
+
+    setTouchedQuestions((current) => {
+      const next = new Set(current);
+      step.questions.forEach((question) => next.add(question.id));
+      return next;
     });
   }
 
@@ -213,6 +225,26 @@ export function SurveyForm() {
     setSubmitting(true);
     setStatus("추천을 계산하는 중");
 
+    const missingQuestion = findFirstUnansweredQuestion(
+      visibleQuestions,
+      responses,
+    );
+
+    if (missingQuestion) {
+      markQuestionTouched(missingQuestion.id);
+      setStepIndex(
+        Math.max(
+          0,
+          steps.findIndex((step) =>
+            step.questions.some((question) => question.id === missingQuestion.id),
+          ),
+        ),
+      );
+      setSubmitting(false);
+      setStatus("필수 문항을 먼저 선택해주세요.");
+      return;
+    }
+
     if (!location) {
       setSubmitting(false);
       setStatus("추천을 계산하려면 먼저 위치를 선택해주세요.");
@@ -241,6 +273,7 @@ export function SurveyForm() {
   }
 
   function moveStep(direction: -1 | 1) {
+    markStepTouched(activeStep);
     setStepIndex(Math.min(Math.max(safeStepIndex + direction, 0), steps.length - 1));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -280,7 +313,10 @@ export function SurveyForm() {
                 <button
                   key={step.id}
                   type="button"
-                  onClick={() => setStepIndex(index)}
+                  onClick={() => {
+                    markStepTouched(activeStep);
+                    setStepIndex(index);
+                  }}
                   className={cn(
                     "flex items-center justify-between rounded-2xl px-3 py-3 text-left transition",
                     index === safeStepIndex
@@ -326,29 +362,6 @@ export function SurveyForm() {
               </div>
             </div>
           </section>
-
-          {activeStep.id === "profile" ? (
-            <section className="apple-panel p-5 sm:p-6">
-              <p className="apple-eyebrow">진학 단계</p>
-              <h2 className="mt-2 text-xl font-black text-[#1d1d1f]">
-                현재 학생은 어디에 있나요?
-              </h2>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <StageButton
-                  active={studentStage === "elementary"}
-                  title="초등학생"
-                  description="중학교 추천"
-                  onClick={() => setStudentStage("elementary")}
-                />
-                <StageButton
-                  active={studentStage === "middle"}
-                  title="중학생"
-                  description="고등학교 추천"
-                  onClick={() => setStudentStage("middle")}
-                />
-              </div>
-            </section>
-          ) : null}
 
           {activeStep.questions.map((question) => (
             <QuestionBlock
@@ -459,42 +472,21 @@ function isAnswered(question: SurveyQuestion, value: SurveyResponseValue | undef
   return value !== undefined && value !== "";
 }
 
+function findFirstUnansweredQuestion(
+  questions: SurveyQuestion[],
+  responses: SurveyResponseMap,
+) {
+  return questions.find(
+    (question) => question.required && !isAnswered(question, responses[question.id]),
+  );
+}
+
 function InfoLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 text-sm">
       <span className="font-bold text-[#86868b]">{label}</span>
       <span className="font-black text-[#1d1d1f]">{value}</span>
     </div>
-  );
-}
-
-function StageButton({
-  active,
-  title,
-  description,
-  onClick,
-}: {
-  active: boolean;
-  title: string;
-  description: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-[20px] border p-4 text-left transition",
-        active
-          ? "border-[rgba(70,138,87,0.42)] bg-[var(--brand-primary-soft)] shadow-sm"
-          : "border-[var(--line)] bg-white/72 hover:border-[rgba(70,138,87,0.36)] hover:bg-white",
-      )}
-    >
-      <span className="block text-base font-black text-[#1d1d1f]">{title}</span>
-      <span className="mt-1 block text-sm font-bold text-[#6e6e73]">
-        {description}
-      </span>
-    </button>
   );
 }
 
@@ -505,7 +497,7 @@ function QuestionBlock({
   onToggle,
 }: {
   question: SurveyQuestion;
-  value: SurveyResponseValue;
+  value: SurveyResponseValue | undefined;
   onChange: (value: SurveyResponseValue) => void;
   onToggle: (value: string) => void;
 }) {
@@ -554,7 +546,11 @@ function QuestionBlock({
         ) : null}
 
         {question.type === "scale" ? (
-          <ScaleInput question={question} value={Number(value)} onChange={onChange} />
+          <ScaleInput
+            question={question}
+            value={typeof value === "number" ? value : undefined}
+            onChange={onChange}
+          />
         ) : null}
       </div>
     </section>
@@ -592,7 +588,7 @@ function ScaleInput({
   onChange,
 }: {
   question: SurveyQuestion;
-  value: number;
+  value?: number;
   onChange: (value: number) => void;
 }) {
   const min = question.min ?? 1;

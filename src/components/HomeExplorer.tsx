@@ -12,13 +12,13 @@ import {
 import { KakaoMap } from "@/components/KakaoMap";
 import { SchoolCard } from "@/components/SchoolCard";
 import { SEOUL_CENTER } from "@/lib/schools";
-import type { School, SchoolLevel } from "@/lib/types";
+import type { School } from "@/lib/types";
 import {
   getStoredUserLocation,
   saveUserLocation,
   storedLocationLabel,
 } from "@/lib/user-location";
-import { cn, formatDistance } from "@/lib/utils";
+import { formatDistance } from "@/lib/utils";
 
 type SchoolWithDistance = School & { distanceKm?: number };
 type SchoolSearchResponse = {
@@ -29,14 +29,8 @@ type SchoolSearchResponse = {
 
 type LocationState = "checking" | "picking" | "ready" | "needs-action";
 
-const levelFilters: Array<{ label: string; value: SchoolLevel }> = [
-  { label: "중학교", value: "middle" },
-  { label: "고등학교", value: "high" },
-];
-
 export function HomeExplorer() {
   const [schools, setSchools] = useState<SchoolWithDistance[]>([]);
-  const [level, setLevel] = useState<SchoolLevel>("high");
   const [center, setCenter] = useState(SEOUL_CENTER);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("위치 조정을 눌러 주변 학교를 찾으세요.");
@@ -45,15 +39,15 @@ export function HomeExplorer() {
   const [draftLocation, setDraftLocation] = useState<{ lat: number; lng: number }>();
   const [draftAccuracy, setDraftAccuracy] = useState<number>();
 
-  const levelSchools = useMemo(
-    () => schools.filter((school) => school.level === level),
-    [level, schools],
+  const highSchools = useMemo(
+    () => schools.filter((school) => school.level === "high"),
+    [schools],
   );
-  const rankedSchools = useMemo(() => levelSchools.slice(0, 3), [levelSchools]);
+  const rankedSchools = useMemo(() => highSchools.slice(0, 3), [highSchools]);
   const visibleSchools = useMemo(() => {
     const keyword = query.trim();
 
-    return levelSchools.filter((school) => {
+    return highSchools.filter((school) => {
       const matchesQuery =
         keyword.length === 0 ||
         school.name.includes(keyword) ||
@@ -62,7 +56,7 @@ export function HomeExplorer() {
 
       return matchesQuery;
     });
-  }, [levelSchools, query]);
+  }, [highSchools, query]);
 
   const loadSchoolsForLocation = useCallback(
     async (nextCenter: { lat: number; lng: number }, locationLabel: string) => {
@@ -75,6 +69,7 @@ export function HomeExplorer() {
         const params = new URLSearchParams({
           lat: String(nextCenter.lat),
           lng: String(nextCenter.lng),
+          level: "high",
           radiusKm: "25",
         });
         const response = await fetch(`/api/schools?${params.toString()}`);
@@ -191,7 +186,7 @@ export function HomeExplorer() {
               locationState={locationState}
               center={center}
               draftLocation={draftLocation}
-              schools={levelSchools}
+              schools={highSchools}
               status={status}
               onDraftChange={setDraftLocation}
             />
@@ -213,9 +208,7 @@ export function HomeExplorer() {
             <LocationRankList
               schools={rankedSchools}
               isReady={locationState === "ready"}
-              level={level}
             />
-            <LevelSwitcher value={level} onChange={setLevel} />
           </div>
         </div>
       </section>
@@ -229,7 +222,7 @@ export function HomeExplorer() {
               </p>
               <div className="mt-2 flex flex-wrap items-end gap-3">
                 <h2 className="apple-title text-3xl">
-                  {level === "middle" ? "중학교" : "고등학교"} 목록
+                  고등학교 목록
                 </h2>
                 {visibleSchools.length > 0 ? (
                   <span className="pb-1 text-sm font-black text-[#86868b]">
@@ -342,11 +335,9 @@ function MapPlaceholder({
 function LocationRankList({
   schools,
   isReady,
-  level,
 }: {
   schools: SchoolWithDistance[];
   isReady: boolean;
-  level: SchoolLevel;
 }) {
   const placeholders = [1, 2, 3];
 
@@ -366,7 +357,7 @@ function LocationRankList({
                 className="flex h-24 flex-col justify-center rounded-[24px] border border-[var(--line)] bg-white/78 px-7 shadow-[0_10px_28px_rgba(29,29,31,0.045)]"
               >
                 <span className="text-base font-black text-[var(--brand-primary)]">
-                  {getLevelLabel(level)} {rank}
+                  고등학교 {rank}
                 </span>
                 <span className="mt-2 text-xl font-black text-[#86868b]">
                   위치 조정 후 표시
@@ -403,34 +394,6 @@ function LocationRankList({
   );
 }
 
-function LevelSwitcher({
-  value,
-  onChange,
-}: {
-  value: SchoolLevel;
-  onChange: (level: SchoolLevel) => void;
-}) {
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      {levelFilters.map((item) => (
-        <button
-          type="button"
-          key={item.value}
-          onClick={() => onChange(item.value)}
-          className={cn(
-            "h-14 rounded-[22px] border px-4 text-2xl font-black transition",
-            value === item.value
-              ? "border-[var(--brand-primary)] bg-[var(--brand-primary)] text-white shadow-[0_14px_34px_rgba(70,138,87,0.2)]"
-              : "border-[var(--line-strong)] bg-white/78 text-[#1d1d1f] hover:border-[rgba(70,138,87,0.42)] hover:bg-[var(--brand-primary-soft)]",
-          )}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function EmptyCandidateState() {
   return (
     <div className="apple-panel p-8 text-center">
@@ -438,12 +401,8 @@ function EmptyCandidateState() {
         조건에 맞는 학교가 없습니다.
       </h3>
       <p className="mt-2 text-sm font-semibold text-[#6e6e73]">
-        검색어나 학교급 필터를 조정해보세요.
+        검색어를 조정해보세요.
       </p>
     </div>
   );
-}
-
-function getLevelLabel(level: SchoolLevel) {
-  return level === "middle" ? "중학교" : "고등학교";
 }

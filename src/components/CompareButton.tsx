@@ -32,7 +32,10 @@ export function CompareButton({
 }) {
   const router = useRouter();
   const targets = useMemo(
-    () => (schools?.length ? schools : school ? [school] : []),
+    () =>
+      (schools?.length ? schools : school ? [school] : []).filter(
+        (item) => item.level === "high",
+      ),
     [school, schools],
   );
   const [storedCount, setStoredCount] = useState(0);

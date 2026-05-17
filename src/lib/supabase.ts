@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import {
-  getAdminEmails,
   getSupabaseServerConfig,
   hasSupabaseServerConfig,
 } from "@/lib/env";
@@ -87,28 +86,6 @@ export async function requireRequestUser(request: Request) {
     return Response.json(
       { message: "로그인이 필요합니다." },
       { status: 401 },
-    );
-  }
-
-  return user;
-}
-
-export async function requireAdminUser(request: Request) {
-  const user = await getRequestUser(request);
-  const adminEmails = getAdminEmails();
-  const email = user?.email?.toLowerCase();
-
-  if (!user || !email || !adminEmails.includes(email)) {
-    if (isLocalDevelopmentRequest(request)) {
-      return {
-        id: "local-admin",
-        email: "local-admin@gotoschool.local",
-      };
-    }
-
-    return Response.json(
-      { message: "관리자 권한이 필요합니다." },
-      { status: 403 },
     );
   }
 

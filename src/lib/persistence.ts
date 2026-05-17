@@ -8,7 +8,7 @@ declare global {
 }
 
 export function hasPersistentDatabase() {
-  return Boolean(process.env.SUPABASE_DIRECT_CONNECTION_KEY);
+  return Boolean(getPersistentDatabaseUrl());
 }
 
 export async function queryPersistentStore<T extends QueryResultRow>(
@@ -32,9 +32,7 @@ function getPool() {
 
   if (!globalThis.__gtsPgPool) {
     globalThis.__gtsPgPool = new Pool({
-      connectionString: normalizeConnectionString(
-        process.env.SUPABASE_DIRECT_CONNECTION_KEY!,
-      ),
+      connectionString: normalizeConnectionString(getPersistentDatabaseUrl()!),
       ssl: {
         rejectUnauthorized: false,
       },
@@ -42,6 +40,14 @@ function getPool() {
   }
 
   return globalThis.__gtsPgPool;
+}
+
+function getPersistentDatabaseUrl() {
+  return (
+    process.env.SUPABASE_DATABASE_URL ??
+    process.env.POSTGRES_URL ??
+    process.env.SUPABASE_DIRECT_CONNECTION_KEY
+  );
 }
 
 function ensureSchema(pool: Pool) {

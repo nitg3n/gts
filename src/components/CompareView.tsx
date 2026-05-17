@@ -214,7 +214,9 @@ async function loadSchoolsByIds(ids: string[], storedSchools: School[]) {
     }),
   );
 
-  return items.filter((school): school is School => Boolean(school));
+  return items.filter(
+    (school): school is School => school?.level === "high",
+  );
 }
 
 function parseCompareIds(ids?: string) {
@@ -283,7 +285,7 @@ function SchoolSnapshot({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-black text-[var(--brand-primary)]">
-            {school.level === "middle" ? "Middle" : "High"}
+            고등학교
           </p>
           <h2 className="mt-2 text-2xl font-black tracking-tight text-[#1d1d1f]">
             {school.name}

@@ -2,19 +2,25 @@ import { z } from "zod";
 import { filterSchools, SEOUL_CENTER } from "@/lib/schools";
 import type {
   Recommendation,
+  RecommendationEvidence,
   School,
-  SchoolLevel,
   SchoolMetricKey,
+  StudentGender,
+  SchoolReview,
   SurveyAnswer,
 } from "@/lib/types";
+import {
+  findGraduationOutcomeForSchool,
+  type GraduationOutcomeIndex,
+  type GraduationOutcomeSummary,
+} from "@/lib/graduation-outcomes";
 import { getPublicFactItems, getPublicFactValue } from "@/lib/public-facts";
 import { distanceKm } from "@/lib/utils";
 
 export const surveyAnswerSchema = z.object({
-  level: z.enum(["middle", "high", "all"]).default("all"),
-  studentStage: z.enum(["elementary", "middle"]).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),
+  studentGender: z.enum(["male", "female"]).optional(),
   distancePreference: z
     .enum(["near", "balanced", "not-important"])
     .default("balanced"),
@@ -49,9 +55,15 @@ type SemanticKey =
   | "club"
   | "reading"
   | "career"
+  | "collegeOutcome"
+  | "careerOutcome"
+  | "globalOutcome"
+  | "learningSupport"
   | "care"
+  | "relationshipSafety"
   | "stability"
   | "activity"
+  | "lifeEnjoyment"
   | "mealFacility"
   | "commuteEase";
 
@@ -71,10 +83,26 @@ type SemanticMatch = {
 type SemanticFit = {
   score: number;
   matches: SemanticMatch[];
+  dimensionScores?: Recommendation["dimensionScores"];
 };
 
 type SemanticProfile = Record<SemanticKey, number>;
 type RawResponseValue = NonNullable<SurveyAnswer["rawResponses"]>[string];
+type RankSchoolsContext = {
+  graduationOutcomes?: GraduationOutcomeIndex;
+  reviews?: SchoolReview[];
+};
+
+type ReviewSummary = {
+  count: number;
+  confidence: number;
+  atmosphere: number;
+  exams: number;
+  meals: number;
+  activities: number;
+  facilities: number;
+  body: string;
+};
 
 const defaultWeights: WeightMap = {
   distance: 0.25,
@@ -89,9 +117,9 @@ const defaultWeights: WeightMap = {
 export function rankSchools(
   answer: SurveyAnswer,
   candidates?: School[],
+  context: RankSchoolsContext = {},
 ): Recommendation[] {
-  const targetLevel = resolveRecommendationLevel(answer);
-  const schoolCandidates = candidates ?? filterSchools(targetLevel);
+  const schoolCandidates = candidates ?? filterSchools("high");
   const origin =
     typeof answer.lat === "number" && typeof answer.lng === "number"
       ? { lat: answer.lat, lng: answer.lng }
@@ -99,15 +127,29 @@ export function rankSchools(
   const weights = normalizeWeights(deriveWeights(answer));
 
   return schoolCandidates
-    .filter((school) => targetLevel === "all" || school.level === targetLevel)
+    .filter((school) => school.level === "high")
+    .filter((school) => matchesHardConstraints(school, answer))
     .map((school) => {
       const km = distanceKm(origin, school);
       const distanceScore = scoreDistance(km, answer.distancePreference);
       const scoreWeights = getScoreWeights(answer.distancePreference);
-      const semanticFit = scoreSemanticFit(school, answer, km);
+      const semanticFit = scoreSemanticFit(school, answer, km, context);
       const priorityScore = scorePriorityFit(school, answer, weights);
       const tagScore = scoreTags(school, answer.preferredTags);
       const preferenceScore = scorePreferenceFit(school, answer);
+      const reviewSummary = summarizeReviewsForSchool(school, context.reviews);
+      const graduationOutcome = context.graduationOutcomes
+        ? findGraduationOutcomeForSchool(school, context.graduationOutcomes)
+        : undefined;
+      const evidence = buildEvidence(
+        school,
+        km,
+        answer,
+        semanticFit,
+        graduationOutcome,
+        reviewSummary,
+      );
+      const confidence = calculateConfidence(school, graduationOutcome, reviewSummary);
       const matchType = resolveMatchType(
         km,
         answer,
@@ -130,7 +172,10 @@ export function rankSchools(
         matchType,
         semanticScore: Math.round(semanticFit.score),
         distanceScore: Math.round(distanceScore),
-        reasons: buildReasons(school, km, answer, semanticFit),
+        confidence,
+        dimensionScores: semanticFit.dimensionScores,
+        evidence,
+        reasons: buildReasons(school, km, answer, semanticFit, evidence),
         caution: buildCaution(km, answer, semanticFit.score),
       };
     })
@@ -141,35 +186,11 @@ export function rankSchools(
     }));
 }
 
-export function resolveRecommendationLevel(
-  answer: Pick<SurveyAnswer, "level" | "studentStage">,
-): SchoolLevel | "all" {
-  if (answer.studentStage === "elementary") {
-    return "middle";
-  }
-
-  if (answer.studentStage === "middle") {
-    return "high";
-  }
-
-  return answer.level;
-}
-
-export function normalizeSurveyAnswerForRecommendation(
+export function schoolMatchesRecommendationConstraints(
+  school: School,
   answer: SurveyAnswer,
-): SurveyAnswer {
-  const level = resolveRecommendationLevel(answer);
-
-  return {
-    ...answer,
-    level,
-    rawResponses: answer.rawResponses
-      ? {
-          ...answer.rawResponses,
-          targetLevel: level,
-        }
-      : answer.rawResponses,
-  };
+) {
+  return matchesHardConstraints(school, answer);
 }
 
 function deriveWeights(answer: SurveyAnswer): WeightMap {
@@ -292,6 +313,84 @@ function scoreTags(school: School, preferredTags: string[]) {
   return clamp(52 + matches * 24);
 }
 
+function matchesHardConstraints(school: School, answer: SurveyAnswer) {
+  if (!matchesStudentGenderEligibility(school, answer.studentGender)) {
+    return false;
+  }
+
+  if (answer.genderPreference === "coed" && school.gender !== "coed") {
+    return false;
+  }
+
+  if (
+    answer.genderPreference === "single-gender" &&
+    !matchesSingleGenderPreference(school, answer.studentGender)
+  ) {
+    return false;
+  }
+
+  const explicitCategoryPreference = getExplicitCategoryPreference(answer);
+
+  if (
+    explicitCategoryPreference &&
+    !categoryMatchesPreference(school.category, explicitCategoryPreference)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function matchesStudentGenderEligibility(
+  school: School,
+  studentGender: StudentGender | undefined,
+) {
+  if (studentGender === "male") {
+    return school.gender !== "girls";
+  }
+
+  if (studentGender === "female") {
+    return school.gender !== "boys";
+  }
+
+  return true;
+}
+
+function matchesSingleGenderPreference(
+  school: School,
+  studentGender: StudentGender | undefined,
+) {
+  if (studentGender === "male") {
+    return school.gender === "boys";
+  }
+
+  if (studentGender === "female") {
+    return school.gender === "girls";
+  }
+
+  return school.gender !== "coed";
+}
+
+function getExplicitCategoryPreference(answer: SurveyAnswer) {
+  const rawPreference = answer.rawResponses?.categoryPreference;
+
+  if (typeof rawPreference === "string") {
+    return isOpenCategoryPreference(rawPreference) ? undefined : rawPreference;
+  }
+
+  if (!answer.rawResponses && answer.categoryPreference) {
+    return isOpenCategoryPreference(answer.categoryPreference)
+      ? undefined
+      : answer.categoryPreference;
+  }
+
+  return undefined;
+}
+
+function isOpenCategoryPreference(value: string) {
+  return value === "any" || value === "other";
+}
+
 function scorePreferenceFit(school: School, answer: SurveyAnswer) {
   let score = 70;
 
@@ -365,7 +464,10 @@ function scoreSchoolSignal(school: School, priority: SchoolMetricKey) {
   }
 
   if (priority === "academics") {
-    if (school.level === "high" && /과학|외국어|국제|마이스터|특성화/.test(school.category)) {
+    if (
+      school.level === "high" &&
+      /영재|과학|외국어|국제|마이스터|특성화/.test(school.category)
+    ) {
       return 76;
     }
 
@@ -391,6 +493,7 @@ function scoreSemanticFit(
   school: School,
   answer: SurveyAnswer,
   km: number,
+  context: RankSchoolsContext,
 ): SemanticFit {
   const signals = deriveSemanticSignals(answer);
 
@@ -398,10 +501,11 @@ function scoreSemanticFit(
     return {
       score: 70,
       matches: [],
+      dimensionScores: {},
     };
   }
 
-  const profile = getSchoolSemanticProfile(school, km);
+  const profile = getSchoolSemanticProfile(school, km, context);
   const totalWeight = signals.reduce((sum, signal) => sum + signal.weight, 0);
   const score =
     signals.reduce(
@@ -420,6 +524,24 @@ function scoreSemanticFit(
   return {
     score: clamp(score),
     matches,
+    dimensionScores: {
+      academic_climate: Math.round(profile.academic),
+      college_outcome: Math.round(profile.collegeOutcome),
+      career_outcome: Math.round(profile.careerOutcome),
+      global_outcome: Math.round(profile.globalOutcome),
+      learning_support: Math.round(profile.learningSupport),
+      science_fit: Math.round(profile.science),
+      practical_fit: Math.round(profile.practical),
+      arts_sports_fit: Math.round(profile.artsSports),
+      project_fit: Math.round(profile.project),
+      activity_variety: Math.round(profile.activity),
+      reading_library: Math.round(profile.reading),
+      relationship_safety: Math.round(profile.relationshipSafety),
+      life_enjoyment: Math.round(profile.lifeEnjoyment),
+      facility_meal: Math.round(profile.mealFacility),
+      commute_fit: Math.round(profile.commuteEase),
+      reputation: Math.round(profile.stability),
+    },
   };
 }
 
@@ -446,20 +568,24 @@ function deriveSemanticSignals(answer: SurveyAnswer): SemanticSignal[] {
 
     if (priority === "academics") {
       add("academic", weight, "학업 분위기");
+      add("learningSupport", 0.45, "학습 지원");
     }
     if (priority === "activities") {
       add("activity", weight, "학교 활동");
       add("club", 0.7, "동아리 선택지");
+      add("lifeEnjoyment", 0.35, "학교생활 만족");
     }
     if (priority === "environment") {
       add("stability", weight, "안정적인 환경");
-      add("care", 0.8, "생활 케어");
+      add("relationshipSafety", 0.9, "관계 안정");
+      add("care", 0.55, "생활 케어");
     }
     if (priority === "meal") {
       add("mealFacility", weight, "시설·급식");
     }
     if (priority === "reviews") {
-      add("stability", 0.8, "학교 생활 만족도");
+      add("lifeEnjoyment", 0.8, "학교 생활 만족도");
+      add("relationshipSafety", 0.45, "학생 체감 분위기");
     }
     if (priority === "stability") {
       add("stability", weight, "안정적인 운영");
@@ -473,19 +599,24 @@ function deriveSemanticSignals(answer: SurveyAnswer): SemanticSignal[] {
 
   const careerDirection = stringResponse(responses.careerDirection);
   if (careerDirection === "college") {
+    add("collegeOutcome", 2.7, "대학 진학 성과");
     add("academic", 2.2, "진학 중심");
+    add("learningSupport", 0.9, "진학·학습 지원");
     add("reading", 0.8, "자료 탐색");
   }
   if (careerDirection === "science") {
     add("science", 2.6, "과학·탐구");
     add("project", 1.5, "프로젝트형 활동");
+    add("collegeOutcome", 0.85, "심화 진학 성과");
     add("academic", 1, "심화 학습");
   }
   if (careerDirection === "global") {
+    add("globalOutcome", 2.7, "국제·해외 진학 성과");
     add("global", 2.6, "외국어·국제");
     add("project", 0.8, "발표·탐구 활동");
   }
   if (careerDirection === "practical") {
+    add("careerOutcome", 2.6, "취업·전문 진로 성과");
     add("practical", 2.6, "실습·진로");
     add("career", 1.6, "진로 연결");
     add("project", 1, "프로젝트형 활동");
@@ -495,34 +626,20 @@ function deriveSemanticSignals(answer: SurveyAnswer): SemanticSignal[] {
     add("activity", 1.3, "활동 중심 생활");
   }
 
-  const middleEnvironment = stringResponse(responses.middleEnvironmentPreference);
-  if (middleEnvironment === "study") {
-    add("academic", 1.8, "학습 분위기");
-    add("stability", 0.9, "차분한 환경");
-  }
-  if (middleEnvironment === "activity") {
-    add("activity", 1.8, "활동 중심 생활");
-    add("club", 1.2, "동아리 선택지");
-  }
-  if (middleEnvironment === "care") {
-    add("care", 1.8, "세심한 생활 케어");
-    add("stability", 1.1, "안정적인 환경");
-  }
-  if (middleEnvironment === "near") {
-    add("commuteEase", 1.5, "통학 부담");
-  }
-
   stringArrayResponse(responses.transitionConcern).forEach((concern) => {
     if (concern === "study") {
       add("academic", 1.4, "학습 적응");
-      add("care", 0.8, "학습 케어");
+      add("learningSupport", 1.15, "학습 케어");
     }
     if (concern === "friends") {
-      add("care", 1.4, "관계 적응");
+      add("relationshipSafety", 1.55, "관계 적응");
+      add("care", 0.75, "생활 케어");
       add("stability", 0.8, "안정적인 분위기");
     }
     if (concern === "care") {
-      add("care", 1.7, "생활 케어");
+      add("relationshipSafety", 1.35, "생활지도 안정감");
+      add("learningSupport", 0.85, "상담·지원");
+      add("care", 0.85, "생활 케어");
       add("stability", 1, "안정적인 운영");
     }
     if (concern === "commute") {
@@ -531,6 +648,7 @@ function deriveSemanticSignals(answer: SurveyAnswer): SemanticSignal[] {
     if (concern === "activity") {
       add("activity", 1.5, "활동 선택지");
       add("club", 1, "동아리 선택지");
+      add("lifeEnjoyment", 0.8, "학교생활 만족");
     }
   });
 
@@ -547,37 +665,45 @@ function deriveSemanticSignals(answer: SurveyAnswer): SemanticSignal[] {
       add("academic", 0.7, "학습 탐색");
     }
     if (activity === "career") {
-      add("career", 1.8, "진로 탐색");
+      add("careerOutcome", 1.6, "진로 결과");
+      add("career", 1.3, "진로 탐색");
     }
     if (activity === "arts-sports") {
       add("artsSports", 1.8, "예체능 활동");
       add("activity", 0.8, "학교 활동");
     }
     if (activity === "community") {
-      add("care", 1.1, "관계와 공동체");
+      add("relationshipSafety", 1.2, "관계와 공동체");
+      add("care", 0.7, "관계와 공동체");
       add("activity", 1, "학생 참여");
+      add("lifeEnjoyment", 0.7, "학교생활 만족");
     }
   });
 
   addScaleSignal(responses.studyAtmosphere, add, [
     ["academic", 0.9, "학업 분위기"],
+    ["collegeOutcome", 0.35, "진학 기반"],
     ["stability", 0.35, "차분한 환경"],
   ]);
   addScaleSignal(responses.learningSupportNeed, add, [
-    ["care", 0.8, "학습 케어"],
+    ["learningSupport", 0.95, "학습 케어"],
     ["academic", 0.45, "학습 지원"],
+    ["career", 0.3, "진로 상담"],
   ]);
   addScaleSignal(responses.schoolLife, add, [
+    ["lifeEnjoyment", 0.95, "학교생활 만족"],
     ["activity", 0.9, "학교 활동"],
     ["club", 0.5, "동아리 선택지"],
   ]);
   addScaleSignal(responses.relationshipSafety, add, [
-    ["care", 0.9, "관계 안정"],
+    ["relationshipSafety", 1, "관계 안정"],
+    ["care", 0.35, "생활 케어"],
     ["stability", 0.5, "안정적인 분위기"],
   ]);
   addScaleSignal(responses.schoolReputation, add, [
     ["stability", 0.65, "학교 신뢰도"],
-    ["academic", 0.45, "진학 기반"],
+    ["collegeOutcome", 0.55, "진학 결과"],
+    ["academic", 0.25, "진학 기반"],
   ]);
   addScaleSignal(responses.facilityMeal, add, [
     ["mealFacility", 0.95, "시설·급식"],
@@ -589,7 +715,11 @@ function deriveSemanticSignals(answer: SurveyAnswer): SemanticSignal[] {
   return [...signals.values()].sort((a, b) => b.weight - a.weight);
 }
 
-function getSchoolSemanticProfile(school: School, km: number): SemanticProfile {
+function getSchoolSemanticProfile(
+  school: School,
+  km: number,
+  context: RankSchoolsContext,
+): SemanticProfile {
   const text = normalizeText(
     [
       school.name,
@@ -604,6 +734,45 @@ function getSchoolSemanticProfile(school: School, km: number): SemanticProfile {
   const clubs = getPublicFactValue(school, "clubs");
   const libraryBooks = getPublicFactValue(school, "libraryBooks");
   const studentsPerTeacher = getPublicFactValue(school, "studentsPerTeacher");
+  const reviewSummary = summarizeReviewsForSchool(school, context.reviews);
+  const graduationOutcome = context.graduationOutcomes
+    ? findGraduationOutcomeForSchool(school, context.graduationOutcomes)
+    : undefined;
+  const collegeOutcomeScore = scoreGraduationOutcome(
+    graduationOutcome?.fourYearRate,
+    graduationOutcome,
+  );
+  const advancementOutcomeScore = scoreGraduationOutcome(
+    graduationOutcome?.advancementRate,
+    graduationOutcome,
+  );
+  const employmentOutcomeScore = scoreGraduationOutcome(
+    Math.max(
+      graduationOutcome?.employmentRate ?? 0,
+      graduationOutcome?.juniorCollegeRate ?? 0,
+    ),
+    graduationOutcome,
+  );
+  const globalOutcomeScore = scoreGraduationOutcome(
+    graduationOutcome?.overseasRate,
+    graduationOutcome,
+    3,
+  );
+  const reviewAcademicScore = reviewSummary
+    ? clamp(50 + (reviewSummary.exams - 3) * 9)
+    : undefined;
+  const reviewCareScore = reviewSummary
+    ? clamp(50 + (reviewSummary.atmosphere - 3) * 11)
+    : undefined;
+  const reviewActivityScore = reviewSummary
+    ? clamp(50 + (reviewSummary.activities - 3) * 11)
+    : undefined;
+  const reviewMealFacilityScore = reviewSummary
+    ? clamp(
+        50 +
+          (((reviewSummary.meals + reviewSummary.facilities) / 2) - 3) * 11,
+      )
+    : undefined;
   const clubsScore =
     clubs && clubs > 0
       ? clamp(58 + clubs * 0.95)
@@ -616,34 +785,103 @@ function getSchoolSemanticProfile(school: School, km: number): SemanticProfile {
     studentsPerTeacher && studentsPerTeacher > 0
       ? clamp(104 - studentsPerTeacher * 2.3)
       : school.metrics.stability;
+  const academicTextScore = boost(
+    school.metrics.academics,
+    text,
+    [/학업|학습|진학|심화|수업|영재|과학고|외국어|국제/],
+    14,
+  );
+  const collegeOutcome = blendEvidence([
+    [collegeOutcomeScore, 0.58],
+    [advancementOutcomeScore, 0.24],
+    [academicTextScore, 0.18],
+    [reviewAcademicScore, reviewSummary ? reviewSummary.confidence * 0.08 : 0],
+  ]);
+  const globalTextScore = boost(
+    /외국어|국제|어학|글로벌/.test(text) ? 80 : 44,
+    text,
+    [/외국어|국제|어학|글로벌/],
+    18,
+  );
+  const globalOutcome = blendEvidence([
+    [globalTextScore, 0.72],
+    [globalOutcomeScore, 0.28],
+  ]);
+  const practicalTextScore = boost(
+    /특성화|마이스터|실습|취업|산학|로봇|공업|상업|디자인|관광|정보|기술/.test(text)
+      ? 82
+      : 44,
+    text,
+    [/특성화|마이스터|실습|취업|산학|로봇|공업|상업|디자인|관광|정보|기술/],
+    16,
+  );
+  const careerOutcome = blendEvidence([
+    [employmentOutcomeScore, 0.52],
+    [practicalTextScore, 0.28],
+    [
+      boost(
+        Math.max(school.metrics.academics, school.metrics.activities),
+        text,
+        [/진로|진학|취업|산학|전공|포트폴리오/],
+        13,
+      ),
+      0.2,
+    ],
+  ]);
+  const learningSupport = blendEvidence([
+    [studentTeacherScore, 0.34],
+    [
+      boost(
+        Math.max(school.metrics.academics, school.metrics.stability),
+        text,
+        [/상담|학습지원|진학지도|진로|멘토|방과후|개별|생활지도/],
+        12,
+      ),
+      0.36,
+    ],
+    [reviewAcademicScore, reviewSummary ? reviewSummary.confidence * 0.15 : 0],
+    [reviewCareScore, reviewSummary ? reviewSummary.confidence * 0.15 : 0],
+  ]);
+  const relationshipSafety = blendEvidence([
+    [
+      boost(
+        Math.max(school.metrics.environment, school.metrics.stability),
+        text,
+        [/상담|생활지도|분위기|케어|관계|안정|소통|학생자치/],
+        12,
+      ),
+      0.55,
+    ],
+    [reviewCareScore, reviewSummary ? reviewSummary.confidence * 0.35 : 0],
+    [studentTeacherScore, 0.1],
+  ]);
+  const lifeEnjoyment = blendEvidence([
+    [boost(school.metrics.activities, text, [/활동|동아리|자율|운동장|실습|축제|체육대회|행사/], 12), 0.48],
+    [reviewActivityScore, reviewSummary ? reviewSummary.confidence * 0.28 : 0],
+    [reviewCareScore, reviewSummary ? reviewSummary.confidence * 0.14 : 0],
+    [reviewMealFacilityScore, reviewSummary ? reviewSummary.confidence * 0.1 : 0],
+  ]);
 
   return {
-    academic: boost(
-      school.metrics.academics,
-      text,
-      [/학업|학습|진학|심화|수업|과학고|외국어|국제/],
-      14,
-    ),
+    academic: blendEvidence([
+      [academicTextScore, 0.42],
+      [collegeOutcome, 0.32],
+      [learningSupport, 0.16],
+      [reviewAcademicScore, reviewSummary ? reviewSummary.confidence * 0.1 : 0],
+    ]),
+    collegeOutcome,
     science: boost(
-      /과학|연구|ai|로봇|공학/.test(text) ? 78 : 46,
+      /영재|과학|연구|ai|로봇|공학/.test(text) ? 78 : 46,
       text,
-      [/과학고|과학|연구|탐구|ai|로봇|공학/],
+      [/영재|과학고|과학|연구|탐구|ai|로봇|공학/],
       16,
     ),
-    global: boost(
-      /외국어|국제|어학|글로벌/.test(text) ? 80 : 44,
-      text,
-      [/외국어|국제|어학|글로벌/],
-      18,
-    ),
-    practical: boost(
-      /특성화|마이스터|실습|취업|산학|로봇|공업|상업|디자인|관광|정보/.test(text)
-        ? 82
-        : 44,
-      text,
-      [/특성화|마이스터|실습|취업|산학|로봇|공업|상업|디자인|관광|정보/],
-      16,
-    ),
+    global: globalOutcome,
+    globalOutcome,
+    practical: blendEvidence([
+      [practicalTextScore, 0.58],
+      [careerOutcome, 0.42],
+    ]),
     artsSports: boost(
       /예술|체육|운동|음악|미술/.test(text) ? 78 : 43,
       text,
@@ -656,32 +894,49 @@ function getSchoolSemanticProfile(school: School, km: number): SemanticProfile {
       [/프로젝트|발표|탐구|연구|실습|포트폴리오/],
       13,
     ),
-    club: boost(clubsScore, text, [/동아리|자율활동|학생자치|활동 선택/], 12),
+    club: blendEvidence([
+      [boost(clubsScore, text, [/동아리|자율활동|학생자치|활동 선택/], 12), 0.82],
+      [reviewActivityScore, reviewSummary ? reviewSummary.confidence * 0.18 : 0],
+    ]),
     reading: boost(booksScore, text, [/독서|도서관|자료|책/], 14),
-    career: boost(
-      Math.max(school.metrics.academics, school.metrics.activities),
-      text,
-      [/진로|진학|취업|산학|전공|포트폴리오/],
-      13,
-    ),
-    care: boost(
-      Math.max(school.metrics.environment, school.metrics.stability),
-      text,
-      [/상담|생활지도|분위기|케어|관계|안정/],
-      12,
-    ),
+    career: blendEvidence([
+      [boost(
+        Math.max(school.metrics.academics, school.metrics.activities),
+        text,
+        [/진로|진학|취업|산학|전공|포트폴리오/],
+        13,
+      ), 0.5],
+      [maxDefined(collegeOutcome, careerOutcome), 0.5],
+    ]),
+    careerOutcome,
+    learningSupport,
+    care: blendEvidence([
+      [relationshipSafety, 0.72],
+      [learningSupport, 0.28],
+    ]),
+    relationshipSafety,
     stability: clamp(
-      (school.metrics.stability * 0.5 +
-        school.metrics.environment * 0.25 +
-        studentTeacherScore * 0.25),
+      blendEvidence([
+        [school.metrics.stability, 0.35],
+        [school.metrics.environment, 0.2],
+        [studentTeacherScore, 0.25],
+        [graduationOutcome?.outcomeStability, graduationOutcome ? 0.2 : 0],
+      ]),
     ),
-    activity: boost(school.metrics.activities, text, [/활동|동아리|자율|운동장|실습/], 12),
-    mealFacility: boost(
-      school.metrics.meal,
-      text,
-      [/급식|시설|운동장|도서관|공간/],
-      12,
-    ),
+    activity: blendEvidence([
+      [boost(school.metrics.activities, text, [/활동|동아리|자율|운동장|실습/], 12), 0.78],
+      [reviewActivityScore, reviewSummary ? reviewSummary.confidence * 0.22 : 0],
+    ]),
+    lifeEnjoyment,
+    mealFacility: blendEvidence([
+      [boost(
+        school.metrics.meal,
+        text,
+        [/급식|시설|운동장|도서관|공간/],
+        12,
+      ), 0.72],
+      [reviewMealFacilityScore, reviewSummary ? reviewSummary.confidence * 0.28 : 0],
+    ]),
     commuteEase: boost(
       scoreDistance(km, "balanced"),
       text,
@@ -703,9 +958,11 @@ function addSignalsFromText(
   }
   if (/외국어|국제|어학|글로벌/.test(normalized)) {
     add("global", weight, "외국어·국제");
+    add("globalOutcome", weight * 0.7, "국제·해외 진학 성과");
   }
-  if (/특성화|마이스터|실습|취업|진로|로봇|공업|상업|디자인|관광|정보/.test(normalized)) {
+  if (/특성화|마이스터|실습|취업|진로|로봇|공업|상업|디자인|관광|정보|기술/.test(normalized)) {
     add("practical", weight, "실습·진로");
+    add("careerOutcome", weight * 0.75, "취업·전문 진로 성과");
   }
   if (/예술|체육|운동/.test(normalized)) {
     add("artsSports", weight, "예체능 활동");
@@ -721,9 +978,12 @@ function addSignalsFromText(
   }
   if (/학업|학습|진학|심화/.test(normalized)) {
     add("academic", weight, "학업 분위기");
+    add("collegeOutcome", weight * 0.65, "진학 성과");
   }
   if (/상담|생활지도|분위기|안정/.test(normalized)) {
     add("care", weight, "생활 케어");
+    add("relationshipSafety", weight * 0.75, "관계 안정");
+    add("learningSupport", weight * 0.45, "상담·지원");
   }
   if (/급식|시설|공간/.test(normalized)) {
     add("mealFacility", weight, "시설·급식");
@@ -731,6 +991,301 @@ function addSignalsFromText(
   if (/통학|교통|접근/.test(normalized)) {
     add("commuteEase", weight, "통학 부담");
   }
+}
+
+function blendEvidence(entries: Array<[number | undefined, number]>) {
+  const usable = entries.filter(
+    (entry): entry is [number, number] =>
+      typeof entry[0] === "number" && Number.isFinite(entry[0]) && entry[1] > 0,
+  );
+  const totalWeight = usable.reduce((sum, [, weight]) => sum + weight, 0);
+
+  if (totalWeight <= 0) {
+    return 66;
+  }
+
+  return clamp(
+    usable.reduce((sum, [value, weight]) => sum + value * weight, 0) /
+      totalWeight,
+  );
+}
+
+function scoreGraduationOutcome(
+  value: number | undefined,
+  outcome: GraduationOutcomeSummary | undefined,
+  multiplier = 1,
+) {
+  if (!outcome || typeof value !== "number") {
+    return undefined;
+  }
+
+  const sampleAdjusted = value * outcome.confidence;
+  return clamp(45 + sampleAdjusted * multiplier * 0.55);
+}
+
+function maxDefined(...values: Array<number | undefined>) {
+  const defined = values.filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value),
+  );
+
+  return defined.length ? Math.max(...defined) : undefined;
+}
+
+function summarizeReviewsForSchool(
+  school: School,
+  reviews: SchoolReview[] | undefined,
+): ReviewSummary | undefined {
+  const schoolReviews = (reviews ?? []).filter(
+    (review) => review.schoolId === school.id && review.status === "approved",
+  );
+
+  if (!schoolReviews.length) {
+    return undefined;
+  }
+
+  const totals = schoolReviews.reduce(
+    (acc, review) => {
+      acc.atmosphere += review.ratings.atmosphere;
+      acc.exams += review.ratings.exams;
+      acc.meals += review.ratings.meals;
+      acc.activities += review.ratings.activities;
+      acc.facilities += review.ratings.facilities;
+      acc.body.push(review.body);
+      return acc;
+    },
+    {
+      atmosphere: 0,
+      exams: 0,
+      meals: 0,
+      activities: 0,
+      facilities: 0,
+      body: [] as string[],
+    },
+  );
+  const count = schoolReviews.length;
+
+  return {
+    count,
+    confidence: Math.min(1, Math.log10(count + 1) / 1.5),
+    atmosphere: totals.atmosphere / count,
+    exams: totals.exams / count,
+    meals: totals.meals / count,
+    activities: totals.activities / count,
+    facilities: totals.facilities / count,
+    body: totals.body.join(" "),
+  };
+}
+
+function buildEvidence(
+  school: School,
+  km: number,
+  answer: SurveyAnswer,
+  semanticFit: SemanticFit,
+  graduationOutcome: GraduationOutcomeSummary | undefined,
+  reviewSummary: ReviewSummary | undefined,
+): RecommendationEvidence[] {
+  const evidence: RecommendationEvidence[] = [];
+  const publicFacts = getPublicFactItems(school);
+  const explicitCategoryPreference = getExplicitCategoryPreference(answer);
+
+  evidence.push({
+    dimension: "commute_fit",
+    label: "선택 위치 기준 거리",
+    source: "kakao",
+    value: `${km.toFixed(1)}km`,
+    confidence: 0.86,
+  });
+
+  if (explicitCategoryPreference) {
+    evidence.push({
+      dimension: "category_fit",
+      label: "희망 고등학교 유형",
+      source: "derived",
+      value: categoryMatchesPreference(school.category, explicitCategoryPreference)
+        ? "일치"
+        : "부분 참고",
+      confidence: 0.74,
+    });
+  }
+
+  if (answer.genderPreference && answer.genderPreference !== "any") {
+    const genderMatched =
+      answer.genderPreference === "coed"
+        ? school.gender === "coed"
+        : school.gender !== "coed";
+
+    evidence.push({
+      dimension: "gender_fit",
+      label: "선호 학교 성별 유형",
+      source: "derived",
+      value: genderMatched ? "일치" : "부분 참고",
+      confidence: 0.7,
+    });
+  }
+
+  publicFacts.slice(0, 4).forEach((fact) => {
+    const dimension =
+      fact.key === "clubs"
+        ? "activity_variety"
+        : fact.key === "libraryBooks"
+          ? "reading_library"
+          : fact.key === "studentsPerTeacher"
+            ? "learning_support"
+            : fact.key === "studentsPerClass"
+              ? "relationship_safety"
+              : "reputation";
+
+    evidence.push({
+      dimension,
+      label: fact.label,
+      source: "schoolinfo",
+      value: fact.value,
+      confidence: 0.92,
+    });
+  });
+
+  if (graduationOutcome) {
+    evidence.push(
+      {
+        dimension: "college_outcome",
+        label: `최근 ${graduationOutcome.years.length}년 4년제 진학률`,
+        source: "kess",
+        value: `${graduationOutcome.fourYearRate.toFixed(1)}%`,
+        confidence: graduationOutcome.confidence,
+      },
+      {
+        dimension: "career_outcome",
+        label: `최근 ${graduationOutcome.years.length}년 취업·전문 진로 비율`,
+        source: "kess",
+        value: `${Math.max(
+          graduationOutcome.employmentRate,
+          graduationOutcome.juniorCollegeRate,
+        ).toFixed(1)}%`,
+        confidence: graduationOutcome.confidence,
+      },
+    );
+
+    if (graduationOutcome.overseasRate > 0) {
+      evidence.push({
+        dimension: "global_outcome",
+        label: "해외 진학 비율",
+        source: "kess",
+        value: `${graduationOutcome.overseasRate.toFixed(1)}%`,
+        confidence: graduationOutcome.confidence,
+      });
+    }
+  }
+
+  if (reviewSummary) {
+    evidence.push({
+      dimension: "life_enjoyment",
+      label: `승인 리뷰 ${reviewSummary.count}건 평균`,
+      source: "review",
+      value: (
+        (reviewSummary.atmosphere +
+          reviewSummary.activities +
+          reviewSummary.meals +
+          reviewSummary.facilities) /
+        4
+      ).toFixed(1),
+      confidence: reviewSummary.confidence,
+    });
+  }
+
+  semanticFit.matches.slice(0, 2).forEach((match) => {
+    evidence.push({
+      dimension: semanticKeyToEvidenceDimension(match.key),
+      label: match.label,
+      source: "derived",
+      value: Math.round(match.score),
+      confidence: 0.62,
+    });
+  });
+
+  return limitEvidence(evidence);
+}
+
+function limitEvidence(evidence: RecommendationEvidence[]) {
+  return evidence
+    .map((item, index) => ({ item, index }))
+    .sort(
+      (a, b) =>
+        evidencePriority(a.item) - evidencePriority(b.item) ||
+        a.index - b.index,
+    )
+    .slice(0, 8)
+    .map(({ item }) => item);
+}
+
+function evidencePriority(evidence: RecommendationEvidence) {
+  if (evidence.source === "kess") {
+    return 0;
+  }
+
+  if (evidence.source === "review") {
+    return 1;
+  }
+
+  if (evidence.dimension === "commute_fit") {
+    return 2;
+  }
+
+  if (evidence.dimension === "category_fit" || evidence.dimension === "gender_fit") {
+    return 3;
+  }
+
+  if (evidence.source === "schoolinfo") {
+    return 4;
+  }
+
+  return 5;
+}
+
+function calculateConfidence(
+  school: School,
+  graduationOutcome: GraduationOutcomeSummary | undefined,
+  reviewSummary: ReviewSummary | undefined,
+) {
+  const officialCoverage =
+    school.source === "kakao-neis" ? 0.48 : school.source === "kakao" ? 0.22 : 0.18;
+  const factCoverage = Math.min(getPublicFactItems(school).length / 5, 1) * 0.18;
+  const outcomeCoverage = (graduationOutcome?.confidence ?? 0) * 0.18;
+  const reviewCoverage = (reviewSummary?.confidence ?? 0) * 0.1;
+  const identityCoverage = school.externalIds?.neisSchoolCode ? 0.06 : 0.03;
+
+  return Math.min(
+    1,
+    officialCoverage + factCoverage + outcomeCoverage + reviewCoverage + identityCoverage,
+  );
+}
+
+function semanticKeyToEvidenceDimension(
+  key: SemanticKey,
+): RecommendationEvidence["dimension"] {
+  const map: Record<SemanticKey, RecommendationEvidence["dimension"]> = {
+    academic: "academic_climate",
+    science: "science_fit",
+    global: "global_outcome",
+    practical: "practical_fit",
+    artsSports: "arts_sports_fit",
+    project: "project_fit",
+    club: "activity_variety",
+    reading: "reading_library",
+    career: "career_outcome",
+    collegeOutcome: "college_outcome",
+    careerOutcome: "career_outcome",
+    globalOutcome: "global_outcome",
+    learningSupport: "learning_support",
+    care: "relationship_safety",
+    relationshipSafety: "relationship_safety",
+    stability: "reputation",
+    activity: "activity_variety",
+    lifeEnjoyment: "life_enjoyment",
+    mealFacility: "facility_meal",
+    commuteEase: "commute_fit",
+  };
+
+  return map[key];
 }
 
 function addScaleSignal(
@@ -778,8 +1333,11 @@ function buildReasons(
   km: number,
   answer: SurveyAnswer,
   semanticFit: SemanticFit,
+  evidence: RecommendationEvidence[],
 ) {
   const reasons: string[] = [];
+  const outcomeEvidence = evidence.find((item) => item.source === "kess");
+  const reviewEvidence = evidence.find((item) => item.source === "review");
 
   if (semanticFit.matches.length) {
     reasons.push(
@@ -790,11 +1348,13 @@ function buildReasons(
     );
   }
 
+  const explicitCategoryPreference = getExplicitCategoryPreference(answer);
+
   if (
-    answer.categoryPreference &&
-    categoryMatchesPreference(school.category, answer.categoryPreference)
+    explicitCategoryPreference &&
+    categoryMatchesPreference(school.category, explicitCategoryPreference)
   ) {
-    reasons.unshift(`${answer.categoryPreference} 선호와 일치합니다.`);
+    reasons.unshift(`${explicitCategoryPreference} 선호와 일치합니다.`);
   }
 
   if (answer.genderPreference === "coed" && school.gender === "coed") {
@@ -815,6 +1375,14 @@ function buildReasons(
     semanticFit.score >= 78
   ) {
     reasons.push("거리는 있지만 응답과 맞는 조건이 강합니다.");
+  }
+
+  if (outcomeEvidence?.value) {
+    reasons.push(`${outcomeEvidence.label} ${outcomeEvidence.value}를 반영했습니다.`);
+  }
+
+  if (reviewEvidence) {
+    reasons.push(`${reviewEvidence.label}을 체감 데이터로 함께 반영했습니다.`);
   }
 
   if (isExpandedMatch(km, answer, semanticFit.score, scoreDistance(km, answer.distancePreference))) {
@@ -867,27 +1435,35 @@ function buildCaution(
 }
 
 function categoryMatchesPreference(category: string, preference: string) {
-  if (category.includes(preference)) {
+  const normalizedCategory = normalizeCategory(category);
+  const normalizedPreference = normalizeCategory(preference);
+
+  if (normalizedCategory.includes(normalizedPreference)) {
     return true;
   }
 
-  if (/외국어|국제/.test(preference)) {
-    return /외국어|국제/.test(category);
-  }
-  if (/특성화|마이스터|공업|상업|디자인|관광|정보|로봇/.test(preference)) {
-    return /특성화|마이스터|공업|상업|디자인|관광|정보|로봇/.test(category);
-  }
-  if (/예술|체육/.test(preference)) {
-    return /예술|체육/.test(category);
-  }
-  if (/과학/.test(preference)) {
-    return /과학/.test(category);
-  }
-  if (/일반/.test(preference)) {
-    return /일반/.test(category);
-  }
+  const categoryMatchers: Array<[RegExp, RegExp]> = [
+    [/일반고?$/, /일반/],
+    [/자율형?사립고?|자사고/, /자율형?사립|자사|자율/],
+    [/영재학교?|영재고?/, /영재/],
+    [/외국어고?|외고/, /외국어|외고/],
+    [/국제고?/, /국제/],
+    [/과학고?/, /과학/],
+    [/예술고?|예고/, /예술|예고/],
+    [/체육고?|체고/, /체육|체고/],
+    [/마이스터고?/, /마이스터/],
+    [/특성화고?/, /특성화|공업|상업|디자인|관광|정보|기술|로봇/],
+  ];
 
-  return false;
+  return categoryMatchers.some(
+    ([preferencePattern, categoryPattern]) =>
+      preferencePattern.test(normalizedPreference) &&
+      categoryPattern.test(normalizedCategory),
+  );
+}
+
+function normalizeCategory(value: string) {
+  return value.replace(/\s+/g, "").toLowerCase();
 }
 
 function clamp(value: number) {

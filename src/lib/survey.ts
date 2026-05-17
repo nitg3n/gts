@@ -1,9 +1,9 @@
 import { schoolSelectionSurvey } from "@/data/surveys";
 import type { CleanSurvey, SurveyQuestion } from "@/data/surveys";
-import type { SchoolLevel, SchoolMetricKey, StudentStage, SurveyAnswer } from "@/lib/types";
+import type { SchoolMetricKey, SurveyAnswer } from "@/lib/types";
 
 export type SurveyResponseValue = string | string[] | number;
-export type SurveyResponseMap = Record<string, SurveyResponseValue>;
+export type SurveyResponseMap = Record<string, SurveyResponseValue | undefined>;
 
 export function getDefaultSurveyResponses(
   survey: CleanSurvey = schoolSelectionSurvey,
@@ -14,15 +14,11 @@ export function getDefaultSurveyResponses(
         return [];
       }
 
-      if (question.type === "scale") {
-        return [[question.id, question.defaultValue ?? 3]];
-      }
-
       if (question.type === "multi") {
-        return [[question.id, question.defaultValue ?? []]];
+        return [[question.id, []]];
       }
 
-      return [[question.id, question.defaultValue ?? question.choices?.[0]?.value ?? ""]];
+      return [];
     }),
   );
 }
@@ -32,7 +28,6 @@ export function deriveSurveyAnswer(
   location?: { lat: number; lng: number },
   survey: CleanSurvey = schoolSelectionSurvey,
 ): SurveyAnswer {
-  const studentStage = getStudentStage(responses);
   const priorityScores = getPriorityScores(responses, survey);
   const priorities = Object.entries(priorityScores)
     .sort((a, b) => b[1] - a[1])
@@ -40,51 +35,21 @@ export function deriveSurveyAnswer(
     .map(([metric]) => metric as SchoolMetricKey);
 
   return {
-    level: getTargetLevelForStage(studentStage, responses, survey),
-    studentStage,
     distancePreference: deriveDistancePreference(responses),
     priorities,
     preferredTags: derivePreferredTags(responses),
+    studentGender: normalizeStudentGender(responses.studentGender),
     genderPreference: normalizeGenderPreference(responses.genderPreference),
     categoryPreference: deriveCategoryPreference(responses),
-    rawResponses: responses,
+    rawResponses: compactSurveyResponses(responses),
     ...location,
   };
 }
 
-export function getStudentStage(responses: SurveyResponseMap): StudentStage {
-  return responses.studentStage === "elementary" ? "elementary" : "middle";
-}
-
-export function getTargetLevelForStage(
-  studentStage: StudentStage,
-  responses: SurveyResponseMap,
-  survey: CleanSurvey,
-): SchoolLevel | "all" {
-  if (studentStage === "elementary") {
-    return "middle";
-  }
-
-  if (studentStage === "middle") {
-    return "high";
-  }
-
-  return normalizeLevel(responses.targetLevel, survey);
-}
-
 export function getVisibleSurveyQuestions(
   survey: CleanSurvey,
-  responses: SurveyResponseMap,
 ) {
-  const studentStage = getStudentStage(responses);
-
-  return survey.questions.filter((question) => {
-    if (!question.visibleForStages) {
-      return true;
-    }
-
-    return question.visibleForStages.includes(studentStage);
-  });
+  return survey.questions;
 }
 
 export function getChoiceLabel(questionId: string, value: SurveyResponseValue) {
@@ -112,7 +77,7 @@ function getPriorityScores(responses: SurveyResponseMap, survey: CleanSurvey) {
     stability: 0,
   };
 
-  getVisibleSurveyQuestions(survey, responses).forEach((question) => {
+  getVisibleSurveyQuestions(survey).forEach((question) => {
     if (question.type !== "scale" || !question.weightTargets) {
       return;
     }
@@ -131,7 +96,10 @@ function getPriorityScores(responses: SurveyResponseMap, survey: CleanSurvey) {
   return scores;
 }
 
-function normalizeScaleValue(question: SurveyQuestion, value: SurveyResponseValue) {
+function normalizeScaleValue(
+  question: SurveyQuestion,
+  value: SurveyResponseValue | undefined,
+) {
   const min = question.min ?? 1;
   const max = question.max ?? 5;
   const numeric = typeof value === "number" ? value : Number(value);
@@ -146,7 +114,6 @@ function normalizeScaleValue(question: SurveyQuestion, value: SurveyResponseValu
 function deriveDistancePreference(responses: SurveyResponseMap) {
   const importance = Number(responses.commuteImportance ?? 3);
   const commuteTime = String(responses.commuteTime ?? "balanced");
-  const middleEnvironment = String(responses.middleEnvironmentPreference ?? "");
   const transitionConcerns = toStringArray(responses.transitionConcern);
 
   if (commuteTime === "any" || importance <= 2) {
@@ -157,7 +124,6 @@ function deriveDistancePreference(responses: SurveyResponseMap) {
     commuteTime === "very-near" ||
     commuteTime === "near" ||
     importance >= 4 ||
-    middleEnvironment === "near" ||
     transitionConcerns.includes("commute")
   ) {
     return "near";
@@ -170,11 +136,13 @@ function derivePreferredTags(responses: SurveyResponseMap) {
   const tags = new Set<string>();
   const category = String(responses.categoryPreference ?? "");
   const careerDirection = String(responses.careerDirection ?? "");
-  const middleEnvironment = String(responses.middleEnvironmentPreference ?? "");
   const transitionConcerns = toStringArray(responses.transitionConcern);
   const activityPreference = toStringArray(responses.activityPreference);
 
-  if (category === "과학고") {
+  if (category === "영재학교" || category === "과학고") {
+    if (category === "영재학교") {
+      tags.add("영재");
+    }
     tags.add("과학");
     tags.add("연구");
   }
@@ -204,6 +172,7 @@ function derivePreferredTags(responses: SurveyResponseMap) {
   }
 
   if (careerDirection === "science") {
+    tags.add("영재");
     tags.add("과학");
     tags.add("연구");
     tags.add("프로젝트");
@@ -224,23 +193,6 @@ function derivePreferredTags(responses: SurveyResponseMap) {
     tags.add("예술");
     tags.add("체육");
     tags.add("활동");
-  }
-
-  if (middleEnvironment === "study") {
-    tags.add("학업");
-  }
-
-  if (middleEnvironment === "activity") {
-    tags.add("동아리");
-  }
-
-  if (middleEnvironment === "care") {
-    tags.add("상담");
-    tags.add("생활지도");
-  }
-
-  if (middleEnvironment === "near") {
-    tags.add("통학");
   }
 
   if (transitionConcerns.includes("study")) {
@@ -340,15 +292,6 @@ function deriveCategoryPreference(responses: SurveyResponseMap) {
   return undefined;
 }
 
-function normalizeLevel(
-  value: SurveyResponseValue | undefined,
-  survey: CleanSurvey,
-) {
-  return value === "middle" || value === "high" || value === "all"
-    ? value
-    : survey.defaultTargetLevel;
-}
-
 function normalizeGenderPreference(value: SurveyResponseValue | undefined) {
   if (value === "single-gender" || value === "any") {
     return value;
@@ -366,6 +309,14 @@ function normalizeGenderPreference(value: SurveyResponseValue | undefined) {
   return "any";
 }
 
+function normalizeStudentGender(value: SurveyResponseValue | undefined) {
+  if (value === "male" || value === "female") {
+    return value;
+  }
+
+  return undefined;
+}
+
 function normalizeTextPreference(value: SurveyResponseValue | undefined) {
   if (typeof value !== "string" || value === "any" || value === "other") {
     return undefined;
@@ -376,4 +327,13 @@ function normalizeTextPreference(value: SurveyResponseValue | undefined) {
 
 function toStringArray(value: SurveyResponseValue | undefined) {
   return Array.isArray(value) ? value : [];
+}
+
+function compactSurveyResponses(responses: SurveyResponseMap) {
+  return Object.fromEntries(
+    Object.entries(responses).filter((entry): entry is [string, SurveyResponseValue] => {
+      const [, value] = entry;
+      return value !== undefined;
+    }),
+  );
 }

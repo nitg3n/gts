@@ -34,7 +34,7 @@ export function SchoolCard({
           <div className="min-w-0">
             <div className="inline-flex items-center gap-1.5 text-xs font-black text-[var(--brand-primary)]">
               <SchoolIcon className="h-3.5 w-3.5" aria-hidden />
-              {school.level === "middle" ? "Middle" : "High"}
+              고등학교
             </div>
             <h3 className="mt-2 text-[21px] font-black leading-tight tracking-tight text-[#1d1d1f]">
               {school.name}

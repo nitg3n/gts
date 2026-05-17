@@ -33,11 +33,14 @@ export function ResultsView({ responseId }: { responseId: string }) {
     );
   }
 
-  const topThree = result.recommendations.slice(0, 3);
+  const recommendations = result.recommendations.filter(
+    (recommendation) => recommendation.school.level === "high",
+  );
+  const topThree = recommendations.slice(0, 3);
   const first = topThree[0];
   const compareSchools = topThree.map((item) => item.school);
   const topThreeIds = new Set(topThree.map((item) => item.school.id));
-  const expandedRecommendations = result.recommendations
+  const expandedRecommendations = recommendations
     .filter(
       (recommendation) =>
         recommendation.matchType === "expanded" &&
@@ -62,12 +65,7 @@ export function ResultsView({ responseId }: { responseId: string }) {
             </h1>
             <div className="mt-6 flex flex-wrap gap-2">
               <Pill>
-                학교급{" "}
-                {result.answer.level === "all"
-                  ? "전체"
-                  : result.answer.level === "middle"
-                    ? "중학교"
-                    : "고등학교"}
+                학교급 고등학교
               </Pill>
               <Pill>거리 {distanceLabel(result.answer.distancePreference)}</Pill>
             </div>
@@ -141,7 +139,7 @@ export function ResultsView({ responseId }: { responseId: string }) {
             <span>학교</span>
             <span className="text-right sm:text-left">거리</span>
           </div>
-          {result.recommendations.map((recommendation) => (
+          {recommendations.map((recommendation) => (
             <Link
               key={recommendation.school.id}
               href={`/schools/${recommendation.school.id}`}

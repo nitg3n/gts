@@ -1,16 +1,13 @@
 import "server-only";
 
-import {
-  normalizeSurveyAnswerForRecommendation,
-  rankSchools,
-  surveyAnswerSchema,
-} from "@/lib/recommendation";
+import { rankSchools, surveyAnswerSchema } from "@/lib/recommendation";
 import { fetchLiveSchoolBySlug } from "@/lib/live-schools";
+import { loadGraduationOutcomeIndex } from "@/lib/graduation-outcomes";
 import { getSchoolById, schools } from "@/lib/schools";
 import { normalizeSchoolIdParam } from "@/lib/school-slug";
 import { hasPersistentDatabase, queryPersistentStore } from "@/lib/persistence";
 import { surveys as defaultSurveys } from "@/data/surveys";
-import type { CleanSurvey } from "@/data/surveys";
+import type { CleanSurvey, SurveyQuestion } from "@/data/surveys";
 import type {
   School,
   SchoolReview,
@@ -184,21 +181,23 @@ export async function saveSurveyAnswer(
   candidates?: School[],
   source?: StoredSurveyResponse["source"],
 ) {
-  const answer = normalizeSurveyAnswerForRecommendation(
-    surveyAnswerSchema.parse(rawAnswer) as SurveyAnswer,
-  );
+  const answer = surveyAnswerSchema.parse(rawAnswer) as SurveyAnswer;
   const schoolCandidates = Array.isArray(candidates) ? candidates : undefined;
 
   if (schoolCandidates?.length) {
     cacheSchools(schoolCandidates);
   }
 
+  const reviews = await getRecommendationReviews();
+  const graduationOutcomes = loadGraduationOutcomeIndex();
   const id = createId("response");
   const stored: StoredSurveyResponse = {
     id,
     answer: sanitizeSurveyAnswer(answer),
     createdAt: new Date().toISOString(),
-    recommendations: rankSchools(answer, schoolCandidates),
+    recommendations: highSchoolRecommendations(
+      rankSchools(answer, schoolCandidates, { graduationOutcomes, reviews }),
+    ),
     source: source ?? (schoolCandidates ? "kakao" : "seed"),
   };
 
@@ -212,21 +211,23 @@ export async function getSurveyResult(id: string) {
   const stored = getStore().surveyResponses.get(id);
 
   if (stored) {
-    return stored;
+    const normalized = normalizeStoredSurveyResponse(stored);
+    getStore().surveyResponses.set(id, normalized);
+    return normalized;
   }
 
   const persistent = await readPersistentSurveyResponse(id);
 
   if (persistent) {
+    const normalized = normalizeStoredSurveyResponse(persistent);
     cacheSchools(
-      persistent.recommendations.map((recommendation) => recommendation.school),
+      normalized.recommendations.map((recommendation) => recommendation.school),
     );
-    getStore().surveyResponses.set(id, persistent);
-    return persistent;
+    getStore().surveyResponses.set(id, normalized);
+    return normalized;
   }
 
   const fallback = surveyAnswerSchema.parse({
-    level: "all",
     distancePreference: "balanced",
     priorities: ["activities", "environment", "academics"],
     preferredTags: ["동아리", "상담"],
@@ -236,8 +237,31 @@ export async function getSurveyResult(id: string) {
     id: "demo",
     answer: fallback,
     createdAt: new Date().toISOString(),
-    recommendations: rankSchools(fallback),
+    recommendations: highSchoolRecommendations(rankSchools(fallback)),
   };
+}
+
+function normalizeStoredSurveyResponse(
+  response: StoredSurveyResponse,
+): StoredSurveyResponse {
+  const answer = surveyAnswerSchema.parse(response.answer) as SurveyAnswer;
+
+  return {
+    ...response,
+    answer: sanitizeSurveyAnswer(answer),
+    recommendations: highSchoolRecommendations(response.recommendations),
+  };
+}
+
+function highSchoolRecommendations(
+  recommendations: StoredSurveyResponse["recommendations"],
+) {
+  return recommendations
+    .filter((recommendation) => recommendation.school?.level === "high")
+    .map((recommendation, index) => ({
+      ...recommendation,
+      rank: index + 1,
+    }));
 }
 
 export async function listReviews(
@@ -315,7 +339,8 @@ async function readPersistentSurveys() {
       `,
     );
 
-    return result?.rows.map((row) => row.payload);
+    const surveys = result?.rows.map((row) => normalizeSurveyDefinition(row.payload));
+    return surveys ? uniqueSurveysById(surveys) : surveys;
   });
 }
 
@@ -331,7 +356,8 @@ async function readPersistentActiveSurvey() {
       `,
     );
 
-    return result?.rows[0]?.payload;
+    const survey = result?.rows[0]?.payload;
+    return survey ? normalizeSurveyDefinition(survey) : undefined;
   });
 }
 
@@ -463,6 +489,16 @@ async function readPersistentReviews(
 
     return result?.rows.map((row) => row.payload);
   });
+}
+
+async function getRecommendationReviews() {
+  const persistentReviews = await readPersistentReviews(undefined, "approved");
+
+  if (persistentReviews) {
+    return persistentReviews.filter(isUserReview);
+  }
+
+  return getStore().reviews.filter(isUserReview);
 }
 
 async function writePersistentReview(review: SchoolReview) {
@@ -613,26 +649,56 @@ function createId(prefix: string) {
 }
 
 function normalizeSurveyDefinition(survey: CleanSurvey): CleanSurvey {
+  const isSelectionSurvey = survey.id.startsWith("school-selection-");
+  const currentSelectionSurvey = defaultSurveys[0];
+
   return {
     ...survey,
-    id: survey.id.trim() || createId("survey"),
-    title: survey.title.trim() || "새 설문",
-    description: survey.description.trim(),
-    audience: survey.audience.trim() || "중학생",
-    defaultTargetLevel: survey.defaultTargetLevel,
-    sourceExampleFiles: survey.sourceExampleFiles ?? [],
-    questions: survey.questions.map((question, index) => ({
-      ...question,
-      id: question.id.trim() || `question-${index + 1}`,
-      title: question.title.trim() || "새 질문",
-      choices: question.choices?.map((choice, choiceIndex) => ({
-        ...choice,
-        id: choice.id.trim() || `${question.id}-choice-${choiceIndex + 1}`,
-        label: choice.label.trim() || "선택지",
-        value: choice.value.trim() || choice.label.trim() || `choice-${choiceIndex + 1}`,
+    id: isSelectionSurvey
+      ? currentSelectionSurvey.id
+      : survey.id.trim() || createId("survey"),
+    title: isSelectionSurvey
+      ? currentSelectionSurvey.title
+      : survey.title.trim() || "새 설문",
+    description: isSelectionSurvey
+      ? currentSelectionSurvey.description
+      : survey.description.trim(),
+    audience: isSelectionSurvey
+      ? currentSelectionSurvey.audience
+      : survey.audience.trim() || "중학생",
+    sourceExampleFiles: isSelectionSurvey
+      ? currentSelectionSurvey.sourceExampleFiles
+      : survey.sourceExampleFiles ?? [],
+    questions: (isSelectionSurvey ? currentSelectionSurvey.questions : survey.questions)
+      .map(normalizeHighSchoolOnlyQuestion)
+      .filter((question): question is CleanSurvey["questions"][number] =>
+        Boolean(question),
+      )
+      .map((question, index) => ({
+        ...question,
+        id: question.id.trim() || `question-${index + 1}`,
+        title: question.title.trim() || "새 질문",
+        choices: question.choices?.map((choice, choiceIndex) => ({
+          ...choice,
+          id: choice.id.trim() || `${question.id}-choice-${choiceIndex + 1}`,
+          label: choice.label.trim() || "선택지",
+          value: choice.value.trim() || choice.label.trim() || `choice-${choiceIndex + 1}`,
+        })),
       })),
-    })),
   };
+}
+
+function normalizeHighSchoolOnlyQuestion(
+  question: SurveyQuestion,
+): SurveyQuestion | undefined {
+  if (
+    question.id === "elementaryGrade" ||
+    question.id === "middleEnvironmentPreference"
+  ) {
+    return undefined;
+  }
+
+  return question;
 }
 
 function cloneSurvey(survey: CleanSurvey): CleanSurvey {
@@ -641,6 +707,19 @@ function cloneSurvey(survey: CleanSurvey): CleanSurvey {
 
 function cloneSurveys(surveys: CleanSurvey[]) {
   return surveys.map(cloneSurvey);
+}
+
+function uniqueSurveysById(surveys: CleanSurvey[]) {
+  const seen = new Set<string>();
+
+  return surveys.filter((survey) => {
+    if (seen.has(survey.id)) {
+      return false;
+    }
+
+    seen.add(survey.id);
+    return true;
+  });
 }
 
 function sanitizeSurveyAnswer(answer: SurveyAnswer) {
@@ -664,6 +743,11 @@ function logPersistentStoreError(error: unknown) {
     error instanceof Error
       ? `${error.name}: ${error.message}`
       : String(error);
+  const hint =
+    detail.includes("getaddrinfo ENOTFOUND") &&
+    detail.includes(".supabase.co")
+      ? " Supabase direct DB hosts can require IPv6. Use the Supavisor pooler connection string in SUPABASE_DATABASE_URL or POSTGRES_URL."
+      : "";
 
-  console.warn(`[gts:persistence] ${detail}`);
+  console.warn(`[gts:persistence] ${detail}${hint}`);
 }

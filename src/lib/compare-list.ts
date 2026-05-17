@@ -14,7 +14,7 @@ export function getStoredCompareSchools() {
     const parsed = raw ? (JSON.parse(raw) as School[]) : [];
 
     return Array.isArray(parsed)
-      ? parsed.filter((school) => school && typeof school.id === "string")
+      ? parsed.filter(isComparableSchool)
       : [];
   } catch {
     clearCompareSchools();
@@ -23,7 +23,7 @@ export function getStoredCompareSchools() {
 }
 
 export function saveStoredCompareSchools(schools: School[]) {
-  const nextSchools = schools.slice(0, maxCompareSchools);
+  const nextSchools = schools.filter(isComparableSchool).slice(0, maxCompareSchools);
 
   if (typeof window !== "undefined") {
     window.localStorage.setItem(storageKey, JSON.stringify(nextSchools));
@@ -61,7 +61,7 @@ export function mergeCompareSchools(current: School[], incoming: School[]) {
   const byId = new Map(current.map((school) => [school.id, school]));
 
   incoming.forEach((school) => {
-    if (!school?.id) {
+    if (!isComparableSchool(school)) {
       return;
     }
 
@@ -70,6 +70,14 @@ export function mergeCompareSchools(current: School[], incoming: School[]) {
   });
 
   return Array.from(byId.values()).slice(-maxCompareSchools);
+}
+
+function isComparableSchool(school: unknown): school is School {
+  return (
+    Boolean(school) &&
+    typeof (school as School).id === "string" &&
+    (school as School).level === "high"
+  );
 }
 
 export function subscribeCompareSchools(listener: () => void) {

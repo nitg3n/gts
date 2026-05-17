@@ -1,34 +1,55 @@
-import { fetchNearbyLiveSchools } from "@/lib/live-schools";
+import {
+  fetchLiveSchoolByName,
+  fetchNearbyLiveSchools,
+} from "@/lib/live-schools";
 import { saveSurveyAnswer } from "@/lib/store";
 import {
-  normalizeSurveyAnswerForRecommendation,
+  schoolMatchesRecommendationConstraints,
   surveyAnswerSchema,
 } from "@/lib/recommendation";
-import type { SurveyAnswer } from "@/lib/types";
+import { loadGraduationOutcomeIndex } from "@/lib/graduation-outcomes";
+import {
+  getSurveyCandidateScope,
+  selectNationwideGraduationCandidates,
+} from "@/lib/survey-candidate-scope";
+import type { School, SurveyAnswer } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const answer = normalizeSurveyAnswerForRecommendation(
-      surveyAnswerSchema.parse(body) as SurveyAnswer,
-    );
+    const answer = surveyAnswerSchema.parse(body) as SurveyAnswer;
     const lat = answer.lat;
     const lng = answer.lng;
     const hasLocation = typeof lat === "number" && typeof lng === "number";
+    const candidateScope = getSurveyCandidateScope(answer.distancePreference);
     const liveResult =
-      hasLocation
+      hasLocation && candidateScope.nearbyLimit > 0
         ? await fetchNearbyLiveSchools({
             lat,
             lng,
-            level: answer.level,
-            radiusKm: 20,
-            limit: 45,
+            level: "high",
+            radiusKm: candidateScope.nearbyRadiusKm,
+            limit: candidateScope.nearbyLimit,
           })
         : undefined;
+    const nationwideSchools =
+      candidateScope.nationwideSchoolLimit > 0
+        ? await fetchNationwideCandidateSchools(
+            answer,
+            candidateScope.nationwideSummaryLimit,
+            candidateScope.nationwideSchoolLimit,
+          )
+        : [];
+    const candidates = uniqueSchools([
+      ...(liveResult?.schools ?? []),
+      ...nationwideSchools,
+    ]);
+    const usedLiveCandidateSearch =
+      hasLocation || candidateScope.nationwideSchoolLimit > 0;
     const result = await saveSurveyAnswer(
       answer,
-      hasLocation ? (liveResult?.schools ?? []) : undefined,
-      liveResult?.source ?? (hasLocation ? "kakao-neis" : undefined),
+      candidates.length ? candidates : usedLiveCandidateSearch ? [] : undefined,
+      usedLiveCandidateSearch ? "kakao-neis" : undefined,
     );
 
     return Response.json({
@@ -45,4 +66,70 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+}
+
+async function fetchNationwideCandidateSchools(
+  answer: SurveyAnswer,
+  summaryLimit: number,
+  schoolLimit: number,
+) {
+  const graduationOutcomes = loadGraduationOutcomeIndex();
+  const summaries = selectNationwideGraduationCandidates(
+    answer,
+    graduationOutcomes,
+    summaryLimit,
+  );
+  const schools = await collectWithConcurrency(summaries, 8, schoolLimit, (summary) =>
+    fetchLiveSchoolByName({
+      schoolName: summary.schoolName,
+      region: summary.region,
+      level: "high",
+    }).then((school) =>
+      school && schoolMatchesRecommendationConstraints(school, answer)
+        ? school
+        : undefined,
+    ),
+  );
+
+  return schools;
+}
+
+async function collectWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  targetCount: number,
+  mapper: (item: T) => Promise<R | undefined>,
+) {
+  const results: R[] = [];
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (nextIndex < items.length && results.length < targetCount) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        const result = await mapper(items[currentIndex]);
+
+        if (result && results.length < targetCount) {
+          results.push(result);
+        }
+      }
+    },
+  );
+
+  await Promise.all(workers);
+  return results;
+}
+
+function uniqueSchools(schools: School[]) {
+  const seen = new Set<string>();
+
+  return schools.filter((school) => {
+    if (seen.has(school.id)) {
+      return false;
+    }
+
+    seen.add(school.id);
+    return true;
+  });
 }

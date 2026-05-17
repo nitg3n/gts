@@ -1,8 +1,8 @@
 export type SchoolLevel = "middle" | "high";
 
-export type StudentStage = "elementary" | "middle";
-
 export type SchoolGender = "coed" | "boys" | "girls";
+
+export type StudentGender = "male" | "female";
 
 export type SchoolDataSource = "seed" | "kakao" | "kakao-neis";
 
@@ -15,6 +15,40 @@ export type SchoolMetricKey =
   | "stability";
 
 export type SchoolMetrics = Record<SchoolMetricKey, number>;
+
+export type SemanticDimension =
+  | "category_fit"
+  | "gender_fit"
+  | "commute_fit"
+  | "academic_climate"
+  | "college_outcome"
+  | "career_outcome"
+  | "global_outcome"
+  | "learning_support"
+  | "science_fit"
+  | "practical_fit"
+  | "arts_sports_fit"
+  | "project_fit"
+  | "activity_variety"
+  | "reading_library"
+  | "relationship_safety"
+  | "life_enjoyment"
+  | "facility_meal"
+  | "reputation";
+
+export type RecommendationEvidence = {
+  dimension: SemanticDimension;
+  label: string;
+  source:
+    | "neis"
+    | "schoolinfo"
+    | "kess"
+    | "review"
+    | "kakao"
+    | "derived";
+  value?: string | number;
+  confidence: number;
+};
 
 export type School = {
   id: string;
@@ -52,10 +86,9 @@ export type School = {
 };
 
 export type SurveyAnswer = {
-  level: SchoolLevel | "all";
-  studentStage?: StudentStage;
   lat?: number;
   lng?: number;
+  studentGender?: StudentGender;
   distancePreference: "near" | "balanced" | "not-important";
   priorities: SchoolMetricKey[];
   preferredTags: string[];
@@ -71,7 +104,10 @@ export type Recommendation = {
   matchType?: "nearby" | "balanced" | "expanded";
   semanticScore?: number;
   distanceScore?: number;
+  confidence?: number;
   distanceKm?: number;
+  dimensionScores?: Partial<Record<SemanticDimension, number>>;
+  evidence?: RecommendationEvidence[];
   reasons: string[];
   caution?: string;
 };

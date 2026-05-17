@@ -28,13 +28,22 @@ describe("mergeCompareSchools", () => {
       "업데이트된 학교",
     );
   });
+
+  it("filters out middle schools from the comparison list", () => {
+    const merged = mergeCompareSchools(
+      [makeSchool("high-a")],
+      [makeSchool("middle-a", "middle-a", "middle"), makeSchool("high-b")],
+    );
+
+    expect(merged.map((school) => school.id)).toEqual(["high-a", "high-b"]);
+  });
 });
 
-function makeSchool(id: string, name = id): School {
+function makeSchool(id: string, name = id, level: School["level"] = "high"): School {
   return {
     id,
     name,
-    level: "high",
+    level,
     category: "일반고",
     district: "서울",
     address: "서울특별시",

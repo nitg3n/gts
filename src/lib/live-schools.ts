@@ -84,6 +84,12 @@ type NearbySchoolSearchParams = {
   limit?: number;
 };
 
+type SchoolNameSearchParams = {
+  schoolName: string;
+  region?: string;
+  level?: SchoolLevel;
+};
+
 export type NearbySchoolSearchResult = {
   schools: School[];
   source: SchoolDataSource;
@@ -232,6 +238,77 @@ export async function fetchLiveSchoolBySlug(id: string) {
     return (
       schools.find((school) => school.id === normalizedId) ??
       schools.find((school) => normalizeSchoolName(school.name) === schoolName) ??
+      schools[0]
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+export async function fetchLiveSchoolByName({
+  schoolName,
+  region,
+  level = "high",
+}: SchoolNameSearchParams) {
+  const kakaoRestKey = process.env.KAKAO_REST_API_KEY;
+
+  if (!kakaoRestKey || !schoolName.trim()) {
+    return undefined;
+  }
+
+  try {
+    const query = region ? `${region} ${schoolName}` : schoolName;
+    const places = await fetchKakaoSchoolKeywordPlaces({
+      query,
+      restKey: kakaoRestKey,
+    });
+    const fallbackPlaces =
+      places.length > 0 || !region
+        ? []
+        : await fetchKakaoSchoolKeywordPlaces({
+            query: schoolName,
+            restKey: kakaoRestKey,
+          });
+    const filteredPlaces = uniqueBy([...places, ...fallbackPlaces], (place) => place.id)
+      .map((place) => ({
+        place,
+        inferredLevel: inferLevel(place.place_name, place.category_name),
+        matchScore: scoreSchoolNamePlaceMatch(place, schoolName, region),
+      }))
+      .filter(({ inferredLevel }) => inferredLevel === level)
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, 4);
+
+    if (filteredPlaces.length === 0) {
+      return undefined;
+    }
+
+    const neisRows = await Promise.all(
+      filteredPlaces.map(({ place, inferredLevel }) =>
+        fetchNeisSchoolInfo(place.place_name, inferredLevel),
+      ),
+    );
+    const disclosureFacts = await Promise.all(
+      filteredPlaces.map(({ place, inferredLevel }, index) =>
+        fetchSchoolDisclosureFacts(place, inferredLevel!, neisRows[index]),
+      ),
+    );
+    const schools = ensureUniqueSchoolSlugs(
+      filteredPlaces
+        .map(({ place, inferredLevel }, index) =>
+          mapPlaceToSchool(
+            place,
+            inferredLevel!,
+            neisRows[index],
+            disclosureFacts[index],
+          ),
+        )
+        .filter(hasOfficialSchoolData),
+    );
+    const normalizedName = normalizeForMatch(schoolName);
+
+    return (
+      schools.find((school) => normalizeForMatch(school.name) === normalizedName) ??
       schools[0]
     );
   } catch {
@@ -640,6 +717,30 @@ function findDisclosureRow(rows: SchoolDisclosureRow[], schoolNames: string[]) {
   });
 }
 
+function scoreSchoolNamePlaceMatch(
+  place: KakaoPlace,
+  schoolName: string,
+  region?: string,
+) {
+  const normalizedTarget = normalizeForMatch(schoolName);
+  const normalizedPlaceName = normalizeForMatch(place.place_name);
+  const placeAddress = `${place.road_address_name} ${place.address_name}`;
+  let score = 0;
+
+  if (normalizedPlaceName === normalizedTarget) {
+    score += 100;
+  } else if (normalizedPlaceName.includes(normalizedTarget)) {
+    score += 60;
+  }
+
+  if (region) {
+    const regionParts = region.split(/\s+/).filter(Boolean);
+    score += regionParts.filter((part) => placeAddress.includes(part)).length * 18;
+  }
+
+  return score;
+}
+
 function getClubCount(row?: SchoolDisclosureRow) {
   const creativeClubCount = parseNumberField(row, "CREAT_EXPER_ACT_CCCLU_FGR");
   const studentClubCount = parseNumberField(row, "STDNT_SLCTL_CCCLU_FGR");
@@ -674,16 +775,26 @@ function inferCategory(
 ) {
   const text = `${neis?.HS_SC_NM ?? ""} ${name} ${categoryName}`;
   const neisHighSchoolCategory = neis?.HS_SC_NM?.trim();
+  const normalizedNeisCategory = normalizeHighSchoolCategory(
+    neisHighSchoolCategory,
+  );
+  const nameSpecificCategory = inferNameSpecificHighSchoolCategory(
+    `${name} ${categoryName}`,
+  );
 
-  if (
-    level === "high" &&
-    neisHighSchoolCategory &&
-    neisHighSchoolCategory !== "해당없음"
-  ) {
-    return neisHighSchoolCategory;
+  if (level === "high" && isGiftedSchoolName(name, text)) {
+    return "영재학교";
   }
 
-  if (/과학/.test(text)) {
+  if (level === "high" && normalizedNeisCategory) {
+    return normalizedNeisCategory;
+  }
+
+  if (level === "high" && nameSpecificCategory) {
+    return nameSpecificCategory;
+  }
+
+  if (isScienceHighSchoolName(name)) {
     return "과학고";
   }
   if (/외국어|국제/.test(text)) {
@@ -692,11 +803,78 @@ function inferCategory(
   if (/마이스터/.test(text)) {
     return "마이스터고";
   }
-  if (/특성화|공업|상업|디자인|관광|정보|로봇/.test(text)) {
+  if (/특성화|공업|상업|디자인|관광|정보|기술|로봇/.test(text)) {
     return "특성화고";
   }
 
   return level === "high" ? "일반고" : "일반중";
+}
+
+function inferNameSpecificHighSchoolCategory(text: string) {
+  if (/영재/.test(text)) {
+    return "영재학교";
+  }
+  if (isScienceHighSchoolName(text)) {
+    return "과학고";
+  }
+  if (/외국어|외고|국제/.test(text)) {
+    return "외국어·국제고";
+  }
+  if (/마이스터/.test(text)) {
+    return "마이스터고";
+  }
+  if (/예술|예고/.test(text)) {
+    return "예술고";
+  }
+  if (/체육|체고/.test(text)) {
+    return "체육고";
+  }
+  if (/특성화|공업|상업|디자인|관광|정보|기술|로봇/.test(text)) {
+    return "특성화고";
+  }
+
+  return undefined;
+}
+
+function normalizeHighSchoolCategory(value?: string) {
+  if (!value || value === "해당없음" || value === "특목고") {
+    return undefined;
+  }
+
+  if (/영재/.test(value)) {
+    return "영재학교";
+  }
+  if (/자율|자사/.test(value)) {
+    return value;
+  }
+  if (/일반/.test(value)) {
+    return "일반고";
+  }
+  if (/특성화|공업|상업|디자인|관광|정보|기술|로봇/.test(value)) {
+    return "특성화고";
+  }
+  if (/마이스터/.test(value)) {
+    return "마이스터고";
+  }
+
+  return value;
+}
+
+function isGiftedSchoolName(name: string, text: string) {
+  return (
+    /영재/.test(text) ||
+    /^(서울과학고등학교|경기과학고등학교|대구과학고등학교|대전과학고등학교|광주과학고등학교)$/.test(
+      name,
+    )
+  );
+}
+
+function isScienceHighSchoolName(value: string) {
+  const text = value.replace(/\s+/g, "");
+
+  return /^(강원|경남|경북|경산|경기북|대구일|대전동신|부산|부산일|세종|울산|인천|인천진산|전남|전북|제주|창원|충남|충북|한성)과학고등학교$/.test(
+    text,
+  );
 }
 
 function inferGender(value?: string): SchoolGender {
@@ -733,12 +911,12 @@ function inferMetrics(
     stability: 72,
   };
 
-  if (/과학|외국어|국제/.test(text)) {
+  if (/영재|과학|외국어|국제/.test(text)) {
     metrics.academics += 12;
     metrics.activities += 5;
   }
 
-  if (/특성화|마이스터|공업|상업|디자인|관광|정보|로봇/.test(text)) {
+  if (/특성화|마이스터|공업|상업|디자인|관광|정보|기술|로봇/.test(text)) {
     metrics.activities += 12;
     metrics.environment += 4;
   }
@@ -847,7 +1025,11 @@ function inferTags(category: string, name: string, level: SchoolLevel) {
     level === "high" ? "고등학교" : "중학교",
   ]);
 
-  if (/과학/.test(text)) {
+  if (/영재/.test(text)) {
+    tags.add("영재");
+    tags.add("과학");
+    tags.add("연구");
+  } else if (/과학/.test(text)) {
     tags.add("과학");
     tags.add("연구");
   }
@@ -855,7 +1037,7 @@ function inferTags(category: string, name: string, level: SchoolLevel) {
     tags.add("어학");
     tags.add("국제");
   }
-  if (/특성화|마이스터|공업|상업|디자인|관광|정보|로봇/.test(text)) {
+  if (/특성화|마이스터|공업|상업|디자인|관광|정보|기술|로봇/.test(text)) {
     tags.add("실습");
     tags.add("진로");
   }
