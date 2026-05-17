@@ -64,7 +64,8 @@ export function loadGraduationOutcomeIndex() {
 
   const filePath = path.join(
     process.cwd(),
-    "outputs",
+    "data",
+    "graduation-outcomes",
     "kess_high_school_graduation_outcomes_2023_2025.json",
   );
 

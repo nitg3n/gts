@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f6f7f4;
+  --background: #f5f5f7;
   --foreground: #1d1d1f;
   --brand-primary: #468A57;
   --brand-primary-dark: #356b43;
@@ -23,8 +23,8 @@
   --surface-strong: #ffffff;
   --line: rgba(29, 29, 31, 0.1);
   --line-strong: rgba(29, 29, 31, 0.16);
-  --shadow-panel: 0 18px 48px rgba(29, 29, 31, 0.07);
-  --shadow-soft: 0 8px 24px rgba(29, 29, 31, 0.06);
+  --shadow-panel: 0 16px 40px rgba(29, 29, 31, 0.065);
+  --shadow-soft: 0 8px 22px rgba(29, 29, 31, 0.052);
 }
 
 @theme inline {
@@ -81,13 +81,12 @@ textarea:focus-visible {
 
 .apple-page {
   min-height: 100vh;
-  background:
-    linear-gradient(180deg, #fbfcfa 0%, #f6f7f4 42%, #f5f5f7 100%);
+  background: var(--background);
 }
 
 .apple-section {
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.64);
 }
 
 .apple-shell {
@@ -111,7 +110,7 @@ textarea:focus-visible {
 
 .apple-panel {
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 22px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
   backdrop-filter: blur(20px);
@@ -119,18 +118,9 @@ textarea:focus-visible {
 
 .apple-card {
   border: 1px solid var(--line);
-  border-radius: 22px;
+  border-radius: 20px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 10px 30px rgba(29, 29, 31, 0.045);
-}
-
-.apple-dark-panel {
-  border-radius: 26px;
-  background:
-    linear-gradient(145deg, rgba(70, 138, 87, 0.28), transparent 42%),
-    #191b19;
-  color: white;
-  box-shadow: 0 22px 52px rgba(29, 29, 31, 0.16);
 }
 
 .apple-button-primary {
@@ -191,7 +181,7 @@ textarea:focus-visible {
 .apple-title {
   color: var(--foreground);
   font-weight: 900;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .apple-copy {

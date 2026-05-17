@@ -1,3 +1,5 @@
+import type { GraduationOutcomeSummary } from "@/lib/graduation-outcomes";
+
 export type SchoolLevel = "middle" | "high";
 
 export type SchoolGender = "coed" | "boys" | "girls";
@@ -15,6 +17,52 @@ export type SchoolMetricKey =
   | "stability";
 
 export type SchoolMetrics = Record<SchoolMetricKey, number>;
+
+export type SchoolDisclosureDetails = {
+  year: number;
+  instruction?: {
+    schoolDays?: number;
+    weeklyClassHours?: number;
+  };
+  library?: {
+    totalUsers?: number;
+    weeklyAverageUsers?: number;
+  };
+  meals?: {
+    targetStudents?: number;
+    servedStudents?: number;
+    cooks?: number;
+    nutritionStaff?: number;
+    cookingAssistants?: number;
+    supplyRate?: number;
+  };
+  activities?: {
+    creativeClubs?: number;
+    studentClubs?: number;
+    creativeParticipants?: number;
+    studentParticipants?: number;
+    creativeBudget?: number;
+    studentClubBudget?: number;
+  };
+  counseling?: {
+    weeClass?: boolean;
+    internalSpecialist?: boolean;
+    externalSpecialist?: boolean;
+    counselingTeachers?: number;
+    externalSpecialists?: number;
+  };
+  afterSchool?: {
+    programs?: number;
+    registeredStudents?: number;
+    participatingStudents?: number;
+    specialClasses?: number;
+    eveningClasses?: number;
+  };
+  scholarships?: {
+    recipients?: number;
+    amount?: number;
+  };
+};
 
 export type SemanticDimension =
   | "category_fit"
@@ -74,6 +122,7 @@ export type School = {
     neisOfficeCode?: string;
   };
   dataUpdatedAt?: string;
+  disclosure?: SchoolDisclosureDetails;
   facts: {
     students: number;
     classes: number;
@@ -108,6 +157,7 @@ export type Recommendation = {
   distanceKm?: number;
   dimensionScores?: Partial<Record<SemanticDimension, number>>;
   evidence?: RecommendationEvidence[];
+  graduationOutcome?: GraduationOutcomeSummary;
   reasons: string[];
   caution?: string;
 };

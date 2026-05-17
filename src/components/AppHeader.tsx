@@ -32,7 +32,7 @@ export function AppHeader() {
               className="h-7 w-7 object-contain"
             />
           </span>
-          <span className="text-[15px] font-black tracking-tight text-[#1d1d1f]">
+          <span className="text-[15px] font-extrabold tracking-normal text-[#1d1d1f]">
             학교로GO
           </span>
         </Link>
@@ -48,9 +48,9 @@ export function AppHeader() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm font-black transition",
+                  "inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm font-extrabold transition",
                   active
-                    ? "bg-[#1d1d1f] text-white shadow-sm"
+                    ? "bg-[var(--brand-primary)] text-white shadow-sm"
                     : "text-[#6e6e73] hover:bg-[var(--brand-primary-soft)] hover:text-[#1d1d1f]",
                 )}
               >

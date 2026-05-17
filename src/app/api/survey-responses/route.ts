@@ -52,11 +52,7 @@ export async function POST(request: Request) {
       usedLiveCandidateSearch ? "kakao-neis" : undefined,
     );
 
-    return Response.json({
-      id: result.id,
-      recommendations: result.recommendations,
-      source: result.source,
-    });
+    return Response.json(result);
   } catch (error) {
     return Response.json(
       {

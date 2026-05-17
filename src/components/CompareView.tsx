@@ -95,26 +95,28 @@ export function CompareView({ ids }: { ids?: string }) {
   return (
     <div className="apple-page">
       <section className="apple-section">
-        <div className="apple-shell grid gap-8 py-12 lg:grid-cols-[minmax(0,1fr)_340px] lg:py-16">
+        <div className="apple-shell grid gap-6 py-9 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-end lg:py-11">
           <div>
             <p className="apple-eyebrow flex items-center gap-2">
               <ArrowRightLeft className="h-4 w-4" aria-hidden />
-              Compare
+              비교
             </p>
-            <h1 className="apple-title mt-3 max-w-3xl text-5xl leading-[1.04] sm:text-6xl">
+            <h1 className="apple-title mt-2 max-w-2xl text-3xl leading-tight sm:text-4xl">
               후보 학교를 같은 기준으로 비교합니다.
             </h1>
           </div>
-          <div className="apple-dark-panel p-6">
-            <Scale className="h-6 w-6 text-[#a7cdb1]" aria-hidden />
-            <div className="mt-5 text-5xl font-black">{selected.length}</div>
-            <p className="mt-2 text-sm font-bold leading-6 text-white/62">
+          <div className="apple-panel p-5">
+            <Scale className="h-5 w-5 text-[var(--brand-primary)]" aria-hidden />
+            <div className="mt-4 text-3xl font-extrabold text-[#1d1d1f]">
+              {selected.length}
+            </div>
+            <p className="mt-1 text-sm font-semibold leading-6 text-[#6e6e73]">
               비교 중인 학교
             </p>
             <button
               type="button"
               onClick={clearSelectedSchools}
-              className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-white/10 px-4 text-sm font-black text-white transition hover:bg-white/18"
+              className="apple-button-secondary mt-4 h-10 gap-2 px-4 text-sm"
             >
               <Trash2 className="h-4 w-4" aria-hidden />
               비우기
@@ -123,7 +125,7 @@ export function CompareView({ ids }: { ids?: string }) {
         </div>
       </section>
 
-      <section className="apple-shell py-10 lg:py-12">
+      <section className="apple-shell py-8 lg:py-10">
         <div className="grid gap-5 lg:grid-cols-3">
           {selected.map((school) => (
             <SchoolSnapshot
@@ -136,7 +138,7 @@ export function CompareView({ ids }: { ids?: string }) {
 
         <div className="apple-panel mt-8 overflow-hidden">
           <div className="border-b border-[var(--line)] bg-white/50 px-5 py-4">
-            <h2 className="text-xl font-black text-[#1d1d1f]">핵심 비교</h2>
+            <h2 className="text-xl font-extrabold text-[#1d1d1f]">핵심 비교</h2>
           </div>
           <div className="overflow-x-auto">
             <div className="min-w-[920px]">
@@ -229,16 +231,16 @@ function EmptyCompareState() {
   return (
     <div className="apple-page">
       <section className="apple-section">
-        <div className="apple-shell grid min-h-[520px] place-items-center py-16 text-center">
+        <div className="apple-shell grid min-h-[420px] place-items-center py-12 text-center">
           <div>
             <p className="apple-eyebrow inline-flex items-center gap-2">
               <ArrowRightLeft className="h-4 w-4" aria-hidden />
-              Compare
+              비교
             </p>
-            <h1 className="apple-title mt-4 text-5xl leading-tight sm:text-6xl">
+            <h1 className="apple-title mt-3 text-3xl leading-tight sm:text-4xl">
               비교할 학교가 아직 없습니다.
             </h1>
-            <p className="apple-copy mx-auto mt-5 max-w-2xl text-lg">
+            <p className="apple-copy mx-auto mt-4 max-w-2xl text-base">
               학교 카드나 상세 화면에서 비교할 후보를 담아보세요.
             </p>
             <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
@@ -264,7 +266,7 @@ function LoadingCompareState() {
   return (
     <div className="apple-page grid min-h-[60vh] place-items-center px-4">
       <div className="text-center">
-        <p className="apple-eyebrow">Compare</p>
+        <p className="apple-eyebrow">비교</p>
         <h1 className="apple-title mt-3 text-3xl">학교 정보를 불러오는 중</h1>
       </div>
     </div>
@@ -281,13 +283,13 @@ function SchoolSnapshot({
   const publicFacts = getPublicFactItems(school).slice(0, 3);
 
   return (
-    <article className="apple-card p-5">
+    <article className="apple-card p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-black text-[var(--brand-primary)]">
+          <p className="text-xs font-extrabold text-[var(--brand-primary)]">
             고등학교
           </p>
-          <h2 className="mt-2 text-2xl font-black tracking-tight text-[#1d1d1f]">
+          <h2 className="mt-2 line-clamp-2 break-keep text-xl font-extrabold tracking-normal text-[#1d1d1f]">
             {school.name}
           </h2>
           <p className="mt-1 text-sm font-bold text-[#6e6e73]">
@@ -313,7 +315,7 @@ function SchoolSnapshot({
 
       <Link
         href={`/schools/${school.id}`}
-        className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-[#1d1d1f] px-4 text-sm font-black text-white transition hover:bg-[var(--brand-primary)]"
+        className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-[var(--brand-primary)] px-4 text-sm font-extrabold text-white transition hover:bg-[var(--brand-primary-dark)]"
       >
         상세 보기
         <ExternalLink className="h-4 w-4" aria-hidden />
@@ -341,7 +343,7 @@ function MiniFact({
         ) : null}
         {label}
       </div>
-      <div className="font-black text-[#1d1d1f]">{value}</div>
+      <div className="font-extrabold text-[#1d1d1f]">{value}</div>
     </div>
   );
 }
@@ -358,7 +360,7 @@ function FactRow({
       className="grid border-b border-[#f1f1f4] last:border-b-0"
       style={{ gridTemplateColumns: `180px repeat(${children.length}, 1fr)` }}
     >
-      <div className="bg-white/50 p-4 text-sm font-black text-[#6e6e73]">
+      <div className="bg-white/50 p-4 text-sm font-extrabold text-[#6e6e73]">
         {label}
       </div>
       {children}
@@ -377,7 +379,9 @@ function FactCell({ children }: { children: ReactNode }) {
 function DecisionNote({ school }: { school: School }) {
   return (
     <article className="apple-card p-5">
-      <h3 className="text-lg font-black text-[#1d1d1f]">{school.name}</h3>
+      <h3 className="line-clamp-2 text-lg font-extrabold text-[#1d1d1f]">
+        {school.name}
+      </h3>
       <div className="mt-4 space-y-3">
         {school.highlights.slice(0, 3).map((highlight) => (
           <div

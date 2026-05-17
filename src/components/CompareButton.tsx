@@ -104,7 +104,7 @@ function compareButtonClass(variant: CompareButtonVariant) {
   }
 
   if (variant === "compact") {
-    return "inline-flex h-10 items-center justify-center gap-2 rounded-full border border-[var(--line-strong)] bg-white/78 px-3 text-sm font-black text-[#1d1d1f] transition hover:border-[rgba(70,138,87,0.42)] hover:bg-[var(--brand-primary-soft)] disabled:cursor-not-allowed disabled:opacity-50";
+    return "inline-flex h-10 items-center justify-center gap-2 rounded-full border border-[var(--line-strong)] bg-white/78 px-3 text-sm font-extrabold text-[#1d1d1f] transition hover:border-[rgba(70,138,87,0.42)] hover:bg-[var(--brand-primary-soft)] disabled:cursor-not-allowed disabled:opacity-50";
   }
 
   return "apple-button-secondary h-11 gap-2 px-4 text-sm";

@@ -9,7 +9,7 @@ const storageKey = "gts:user-location:v1";
 const maxAgeMs = 1000 * 60 * 60 * 24 * 30;
 
 export function getStoredUserLocation(): StoredUserLocation | undefined {
-  if (typeof window === "undefined") {
+  if (!canUseLocalStorage()) {
     return undefined;
   }
 
@@ -44,7 +44,7 @@ export function saveUserLocation(
   location: { lat: number; lng: number },
   accuracy?: number,
 ) {
-  if (typeof window === "undefined") {
+  if (!canUseLocalStorage()) {
     return;
   }
 
@@ -59,7 +59,7 @@ export function saveUserLocation(
 }
 
 export function clearStoredUserLocation() {
-  if (typeof window === "undefined") {
+  if (!canUseLocalStorage()) {
     return;
   }
 
@@ -86,4 +86,8 @@ export function storedLocationLabel(location: StoredUserLocation) {
   }
 
   return "선택한 위치";
+}
+
+function canUseLocalStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }

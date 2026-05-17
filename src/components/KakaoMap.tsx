@@ -94,9 +94,15 @@ export function KakaoMap({
     }
 
     const container = mapRef.current;
+    let isDisposed = false;
+    container.replaceChildren();
 
     loadKakao(kakaoJsKey)
       .then(() => {
+        if (isDisposed) {
+          return;
+        }
+
         const kakao = window.kakao;
         if (!kakao) {
           logKakaoMapIssue("Kakao SDK script loaded but window.kakao is missing", {
@@ -107,7 +113,12 @@ export function KakaoMap({
         }
 
         kakao.maps.load(() => {
+          if (isDisposed) {
+            return;
+          }
+
           try {
+            container.replaceChildren();
             const map = new kakao.maps.Map(container, {
               center: new kakao.maps.LatLng(center.lat, center.lng),
               draggable: true,
@@ -182,12 +193,21 @@ export function KakaoMap({
         });
       })
       .catch((error) => {
+        if (isDisposed) {
+          return;
+        }
+
         logKakaoMapIssue("Kakao SDK script failed to load", {
           origin: getWindowOrigin(),
           error,
         });
         setStatus("error");
       });
+
+    return () => {
+      isDisposed = true;
+      container.replaceChildren();
+    };
   }, [
     center.lat,
     center.lng,
@@ -209,7 +229,7 @@ export function KakaoMap({
       {displayStatus === "ready" && centerMarkerLabel && onCenterChange ? (
         <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center">
           <div className="-mt-10 flex flex-col items-center">
-            <div className="rounded-full bg-[#1d1d1f] px-3 py-1.5 text-xs font-black text-white shadow-sm">
+            <div className="rounded-full bg-[var(--brand-primary)] px-3 py-1.5 text-xs font-extrabold text-white shadow-sm">
               {centerMarkerLabel}
             </div>
             <div className="mt-1 h-5 w-5 rounded-full border-4 border-white bg-[var(--brand-primary)] shadow-sm" />
@@ -305,7 +325,7 @@ function KakaoMapStatus({
         <div className="apple-icon-bubble mx-auto h-12 w-12">
           <MapPinned className="h-5 w-5" aria-hidden />
         </div>
-        <h2 className="mt-4 text-2xl font-black tracking-tight text-[#1d1d1f]">
+        <h2 className="mt-4 text-2xl font-extrabold tracking-normal text-[#1d1d1f]">
           {isLoading ? "지도 연결 중" : "지도를 불러오지 못했어요"}
         </h2>
         <p className="mt-3 max-w-md text-sm font-semibold leading-6 text-[#6e6e73]">

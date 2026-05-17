@@ -26,6 +26,8 @@ import {
   type SurveyResponseMap,
   type SurveyResponseValue,
 } from "@/lib/survey";
+import { saveLatestSurveyResult } from "@/lib/latest-survey-result";
+import type { StoredSurveyResponse } from "@/lib/types";
 import {
   getStoredUserLocation,
   saveUserLocation,
@@ -71,7 +73,13 @@ const stepMeta: Record<StepId, Omit<SurveyStep, "id" | "questions">> = {
   },
 };
 
-export function SurveyForm() {
+export function SurveyForm({
+  onComplete,
+  submitLabel = "추천 결과 보기",
+}: {
+  onComplete?: (responseId: string) => void;
+  submitLabel?: string;
+} = {}) {
   const router = useRouter();
   const [survey, setSurvey] = useState<CleanSurvey>(schoolSelectionSurvey);
   const [responses, setResponses] = useState<SurveyResponseMap>(() =>
@@ -261,10 +269,26 @@ export function SurveyForm() {
       body: JSON.stringify(answer),
     });
 
-    const data = (await response.json()) as { id?: string; message?: string };
+    const data = (await response.json()) as Partial<StoredSurveyResponse> & {
+      message?: string;
+    };
 
-    if (!response.ok || !data.id) {
+    if (
+      !response.ok ||
+      !data.id ||
+      !data.answer ||
+      !data.createdAt ||
+      !Array.isArray(data.recommendations)
+    ) {
       setStatus(data.message ?? "추천 계산에 실패했습니다.");
+      setSubmitting(false);
+      return;
+    }
+
+    saveLatestSurveyResult(data as StoredSurveyResponse);
+
+    if (onComplete) {
+      onComplete(data.id);
       setSubmitting(false);
       return;
     }
@@ -290,7 +314,7 @@ export function SurveyForm() {
             <p className="apple-copy mt-4 text-base">{survey.description}</p>
 
             <div className="mt-6">
-              <div className="flex items-center justify-between text-xs font-black text-[#86868b]">
+              <div className="flex items-center justify-between text-xs font-extrabold text-[#86868b]">
                 <span>완성도</span>
                 <span>{progress}%</span>
               </div>
@@ -325,10 +349,10 @@ export function SurveyForm() {
                   )}
                 >
                   <span>
-                    <span className="block text-xs font-black opacity-70">
+                    <span className="block text-xs font-extrabold opacity-70">
                       {step.eyebrow}
                     </span>
-                    <span className="mt-0.5 block text-sm font-black">
+                    <span className="mt-0.5 block text-sm font-extrabold">
                       {step.title}
                     </span>
                   </span>
@@ -346,7 +370,7 @@ export function SurveyForm() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="apple-eyebrow">{activeStep.eyebrow}</p>
-                <h2 className="mt-2 text-3xl font-black tracking-tight text-[#1d1d1f]">
+                <h2 className="mt-2 text-3xl font-extrabold tracking-normal text-[#1d1d1f]">
                   {activeStep.title}
                 </h2>
                 <p className="mt-2 text-sm font-semibold leading-6 text-[#6e6e73]">
@@ -413,7 +437,7 @@ export function SurveyForm() {
                   disabled={submitting}
                   className="apple-button-primary h-12 gap-2 px-5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  추천 결과 보기
+                  {submitLabel}
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </button>
               )}
@@ -485,7 +509,7 @@ function InfoLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 text-sm">
       <span className="font-bold text-[#86868b]">{label}</span>
-      <span className="font-black text-[#1d1d1f]">{value}</span>
+      <span className="font-extrabold text-[#1d1d1f]">{value}</span>
     </div>
   );
 }
@@ -505,7 +529,7 @@ function QuestionBlock({
     <section className="apple-panel p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-black text-[#1d1d1f]">{question.title}</h2>
+          <h2 className="text-xl font-extrabold text-[#1d1d1f]">{question.title}</h2>
           {question.description ? (
             <p className="mt-2 text-sm font-semibold leading-6 text-[#6e6e73]">
               {question.description}
@@ -632,7 +656,7 @@ function ChoiceButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "min-h-[58px] rounded-2xl border px-4 py-3 text-left text-sm font-black transition",
+        "min-h-[58px] rounded-2xl border px-4 py-3 text-left text-sm font-extrabold transition",
         active
           ? "border-[var(--brand-primary)] bg-[var(--brand-primary)] text-white shadow-[0_8px_20px_rgba(70,138,87,0.18)]"
           : "border-[var(--line-strong)] bg-white/78 text-[#1d1d1f] hover:border-[rgba(70,138,87,0.42)] hover:bg-[var(--brand-primary-soft)]",
@@ -667,7 +691,7 @@ function ScaleButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "h-11 rounded-full border text-sm font-black transition",
+        "h-11 rounded-full border text-sm font-extrabold transition",
         active
           ? "border-[var(--brand-primary)] bg-[var(--brand-primary)] text-white shadow-[0_8px_20px_rgba(70,138,87,0.18)]"
           : "border-[var(--line-strong)] bg-white/78 text-[#1d1d1f] hover:border-[rgba(70,138,87,0.42)] hover:bg-[var(--brand-primary-soft)]",
@@ -697,8 +721,8 @@ function LocationBlock({
     <section className="apple-panel p-5 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="apple-eyebrow">Location</p>
-          <h2 className="mt-2 text-xl font-black text-[#1d1d1f]">
+          <p className="apple-eyebrow">위치</p>
+          <h2 className="mt-2 text-xl font-extrabold text-[#1d1d1f]">
             추천 기준 위치
           </h2>
         </div>
@@ -738,7 +762,7 @@ function LocationBlock({
             centerMarkerLabel="추천 기준 위치"
             className="min-h-[340px]"
           />
-          <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-[var(--brand-primary-soft)] px-4 py-2 text-sm font-black text-[var(--brand-primary-dark)]">
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-[var(--brand-primary-soft)] px-4 py-2 text-sm font-extrabold text-[var(--brand-primary-dark)]">
             <Check className="h-4 w-4" aria-hidden />
             {locationSource || "선택한 위치"}
           </div>
@@ -749,7 +773,7 @@ function LocationBlock({
             <div className="apple-icon-bubble mx-auto h-12 w-12">
               <LocateFixed className="h-5 w-5" aria-hidden />
             </div>
-            <p className="mt-4 text-sm font-black text-[#1d1d1f]">
+            <p className="mt-4 text-sm font-extrabold text-[#1d1d1f]">
               위치를 선택하면 추천 기준 지도가 표시됩니다.
             </p>
           </div>

@@ -3,6 +3,7 @@ import "server-only";
 import type {
   School,
   SchoolDataSource,
+  SchoolDisclosureDetails,
   SchoolGender,
   SchoolLevel,
   SchoolMetrics,
@@ -74,7 +75,9 @@ type SchoolDisclosureResponse = {
   list?: SchoolDisclosureRow[];
 };
 
-type SchoolDisclosureFacts = Partial<School["facts"]>;
+type SchoolDisclosureFacts = Partial<School["facts"]> & {
+  disclosure?: SchoolDisclosureDetails;
+};
 
 type NearbySchoolSearchParams = {
   lat: number;
@@ -560,6 +563,7 @@ function mapPlaceToSchool(
       neisOfficeCode: neis?.ATPT_OFCDC_SC_CODE,
     },
     dataUpdatedAt: new Date().toISOString(),
+    disclosure: disclosureFacts?.disclosure,
     facts: {
       students: disclosureFacts?.students ?? 0,
       classes: disclosureFacts?.classes ?? 0,
@@ -591,10 +595,42 @@ async function fetchSchoolDisclosureFacts(
 
   const year = getDisclosureYear();
   const kindCode = level === "high" ? "04" : "03";
-  const [studentRows, clubRows] = await Promise.all([
+  const [
+    studentRows,
+    mealRows,
+    libraryRows,
+    scholarshipRows,
+    clubRows,
+    afterSchoolRows,
+    counselingRows,
+  ] = await Promise.all([
     fetchDisclosureList({
       apiKey,
       apiType: "09",
+      year,
+      sidoCode,
+      sggCode,
+      kindCode,
+    }),
+    fetchDisclosureList({
+      apiKey,
+      apiType: "34",
+      year,
+      sidoCode,
+      sggCode,
+      kindCode,
+    }),
+    fetchDisclosureList({
+      apiKey,
+      apiType: "38",
+      year,
+      sidoCode,
+      sggCode,
+      kindCode,
+    }),
+    fetchDisclosureList({
+      apiKey,
+      apiType: "55",
       year,
       sidoCode,
       sggCode,
@@ -608,6 +644,22 @@ async function fetchSchoolDisclosureFacts(
       sggCode,
       kindCode,
     }),
+    fetchDisclosureList({
+      apiKey,
+      apiType: "59",
+      year,
+      sidoCode,
+      sggCode,
+      kindCode,
+    }),
+    fetchDisclosureList({
+      apiKey,
+      apiType: "61",
+      year,
+      sidoCode,
+      sggCode,
+      kindCode,
+    }),
   ]);
   const names = [
     neis?.SCHUL_NM,
@@ -615,9 +667,22 @@ async function fetchSchoolDisclosureFacts(
     place.place_name,
   ].filter(Boolean) as string[];
   const studentRow = findDisclosureRow(studentRows, names);
+  const mealRow = findDisclosureRow(mealRows, names);
+  const libraryRow = findDisclosureRow(libraryRows, names);
+  const scholarshipRow = findDisclosureRow(scholarshipRows, names);
   const clubRow = findDisclosureRow(clubRows, names);
+  const afterSchoolRow = findDisclosureRow(afterSchoolRows, names);
+  const counselingRow = findDisclosureRow(counselingRows, names);
 
-  if (!studentRow && !clubRow) {
+  if (
+    !studentRow &&
+    !mealRow &&
+    !libraryRow &&
+    !scholarshipRow &&
+    !clubRow &&
+    !afterSchoolRow &&
+    !counselingRow
+  ) {
     return undefined;
   }
 
@@ -626,6 +691,16 @@ async function fetchSchoolDisclosureFacts(
     classes: parseNumberField(studentRow, "COL_C_SUM"),
     teachers: parseNumberField(studentRow, "TEACH_CNT"),
     clubs: getClubCount(clubRow),
+    mealSatisfaction: parseNumberField(mealRow, "KS_RATE"),
+    disclosure: buildDisclosureDetails({
+      year,
+      mealRow,
+      libraryRow,
+      scholarshipRow,
+      clubRow,
+      afterSchoolRow,
+      counselingRow,
+    }),
   };
 }
 
@@ -747,6 +822,72 @@ function getClubCount(row?: SchoolDisclosureRow) {
   const total = creativeClubCount + studentClubCount;
 
   return total > 0 ? total : Math.max(creativeClubCount, studentClubCount);
+}
+
+function buildDisclosureDetails({
+  year,
+  mealRow,
+  libraryRow,
+  scholarshipRow,
+  clubRow,
+  afterSchoolRow,
+  counselingRow,
+}: {
+  year: number;
+  mealRow?: SchoolDisclosureRow;
+  libraryRow?: SchoolDisclosureRow;
+  scholarshipRow?: SchoolDisclosureRow;
+  clubRow?: SchoolDisclosureRow;
+  afterSchoolRow?: SchoolDisclosureRow;
+  counselingRow?: SchoolDisclosureRow;
+}): SchoolDisclosureDetails | undefined {
+  const details: SchoolDisclosureDetails = {
+    year,
+    library: compactObject({
+      totalUsers: positiveNumberField(libraryRow, "ALL_IFRMA_UTILZ_STDNT_FGR"),
+      weeklyAverageUsers: positiveNumberField(
+        libraryRow,
+        "WIK_AVRG_IFRMA_UTILZ_STDNT_FGR",
+      ),
+    }),
+    meals: compactObject({
+      targetStudents: positiveNumberField(mealRow, "HAKSAENGSU_TOT"),
+      servedStudents: positiveNumberField(mealRow, "MLSV_STDNT_FGR"),
+      cooks: positiveNumberField(mealRow, "COOK_FGR"),
+      nutritionStaff: positiveNumberField(mealRow, "NTRST_FGR"),
+      cookingAssistants: positiveNumberField(mealRow, "COOAS_FGR"),
+      supplyRate: positiveNumberField(mealRow, "KS_RATE"),
+    }),
+    activities: compactObject({
+      creativeClubs: positiveNumberField(clubRow, "CREAT_EXPER_ACT_CCCLU_FGR"),
+      studentClubs: positiveNumberField(clubRow, "STDNT_SLCTL_CCCLU_FGR"),
+      creativeParticipants: positiveNumberField(clubRow, "CREAT_EXPER_ACT_STDNT_FGR"),
+      studentParticipants: positiveNumberField(clubRow, "STDNT_SLCTL_FGR"),
+      creativeBudget: positiveNumberField(clubRow, "CREAT_EXPER_ACT_BDG_SPORT_AMT"),
+      studentClubBudget: positiveNumberField(clubRow, "CCCLU_ACT_BDG_SPORT_AMT"),
+    }),
+    counseling: compactObject({
+      weeClass: parseYesNoField(counselingRow, "WEE_CINSTL_YN"),
+      internalSpecialist: parseYesNoField(counselingRow, "INNER_CNSL_SPLST_OPER_YN"),
+      externalSpecialist: parseYesNoField(counselingRow, "EXTRL_CNSL_SPLST_OPER_YN"),
+    }),
+    afterSchool: compactObject({
+      programs: positiveNumberField(afterSchoolRow, "SUM_ASL_PGM_FGR"),
+      registeredStudents: positiveNumberField(afterSchoolRow, "SUM_ASL_REG_STDNT_FGR"),
+      participatingStudents: positiveNumberField(afterSchoolRow, "ASL_PTPT_STDNT_FGR"),
+      specialClasses: positiveNumberField(afterSchoolRow, "SPCLY_ADY_CCCCL_FGR"),
+      eveningClasses: positiveNumberField(afterSchoolRow, "ECC_PM_OPER_CCCLA_FGR"),
+    }),
+    scholarships: compactObject({
+      recipients: positiveNumberField(scholarshipRow, "NMPR_FGR_SUM"),
+      amount: positiveNumberField(scholarshipRow, "AMT_SUM"),
+    }),
+  };
+  const compactDetails = compactObject(details);
+
+  return Object.keys(compactDetails).length > 1
+    ? (compactDetails as SchoolDisclosureDetails)
+    : undefined;
 }
 
 function inferLevel(
@@ -1122,6 +1263,46 @@ function parseNumberField(row: SchoolDisclosureRow | undefined, key: string) {
       : Number(String(value ?? "").replaceAll(",", ""));
 
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function positiveNumberField(row: SchoolDisclosureRow | undefined, key: string) {
+  const value = parseNumberField(row, key);
+  return value > 0 ? value : undefined;
+}
+
+function parseYesNoField(row: SchoolDisclosureRow | undefined, key: string) {
+  const value = String(row?.[key] ?? "").trim();
+
+  if (!value) {
+    return undefined;
+  }
+
+  if (/^(Y|YES|TRUE|1|운영|설치|있음|예|○)$/i.test(value)) {
+    return true;
+  }
+
+  if (/^(N|NO|FALSE|0|미운영|미설치|없음|아니오|X)$/i.test(value)) {
+    return false;
+  }
+
+  return undefined;
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => {
+      if (entry === undefined) {
+        return false;
+      }
+
+      return !(
+        typeof entry === "object" &&
+        entry !== null &&
+        !Array.isArray(entry) &&
+        Object.keys(entry).length === 0
+      );
+    }),
+  ) as Partial<T>;
 }
 
 function formatCommute(distance?: string) {

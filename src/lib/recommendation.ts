@@ -175,6 +175,7 @@ export function rankSchools(
         confidence,
         dimensionScores: semanticFit.dimensionScores,
         evidence,
+        graduationOutcome,
         reasons: buildReasons(school, km, answer, semanticFit, evidence),
         caution: buildCaution(km, answer, semanticFit.score),
       };
