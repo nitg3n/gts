@@ -10,6 +10,7 @@ import {
 import { CompareButton } from "@/components/CompareButton";
 import { KakaoMap } from "@/components/KakaoMap";
 import { ReviewsPanel } from "@/components/ReviewsPanel";
+import { SchoolEmblem } from "@/components/SchoolEmblem";
 import {
   findGraduationOutcomeForSchool,
   loadGraduationOutcomeIndex,
@@ -48,9 +49,12 @@ export default async function SchoolPage({
             <p className="apple-eyebrow">
               고등학교
             </p>
-            <h1 className="apple-title mt-2 text-3xl leading-tight sm:text-4xl">
-              {school.name}
-            </h1>
+            <div className="mt-2 flex min-w-0 items-start gap-3">
+              <SchoolEmblem school={school} size={48} className="mt-1 rounded-xl" />
+              <h1 className="apple-title min-w-0 text-3xl leading-tight sm:text-4xl">
+                {school.name}
+              </h1>
+            </div>
             <p className="apple-copy mt-4 max-w-2xl text-base">
               {school.description}
             </p>
@@ -313,6 +317,9 @@ function GraduationOutcomePanel({
     },
   ];
   const detailRows = [
+    ...(outcome.specialPurposeType
+      ? [["학교 유형", outcome.specialPurposeType]]
+      : []),
     ["전문대 진학률", formatPercent(outcome.juniorCollegeRate)],
     ["취업률", formatPercent(outcome.employmentRate)],
     ["해외 진학률", formatPercent(outcome.overseasRate)],
@@ -330,6 +337,11 @@ function GraduationOutcomePanel({
             <h2 className="mt-1 text-xl font-extrabold tracking-normal text-[#1d1d1f]">
               졸업 후 상황
             </h2>
+            {outcome.specialPurposeType ? (
+              <span className="mt-3 inline-flex rounded-full bg-[var(--brand-primary-soft)] px-3 py-1 text-xs font-extrabold text-[var(--brand-primary-dark)]">
+                {outcome.specialPurposeType}
+              </span>
+            ) : null}
           </div>
           <div className="text-sm font-extrabold text-[#6e6e73]">
             {yearRange} · 졸업생 {formatNumber(outcome.graduatesTotal)}명

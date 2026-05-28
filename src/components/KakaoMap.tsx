@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapPinned } from "lucide-react";
+import { getSchoolEmblemSrc } from "@/lib/school-emblems";
 import type { School } from "@/lib/types";
 
 type KakaoLatLng = {
@@ -145,8 +146,10 @@ export function KakaoMap({
               marker.setMap(map);
               bounds.extend(position);
 
+              const emblemSrc = getSchoolEmblemSrc(school) ?? "/logo-black.svg";
+              const emblemHtml = `<img src="${escapeHtml(emblemSrc)}" alt="" style="width:22px;height:22px;object-fit:contain;border:1px solid #e8e8ed;border-radius:7px;background:white;padding:2px;flex:none;" />`;
               const info = new kakao.maps.InfoWindow({
-                content: `<div style="padding:10px 12px;font-size:12px;font-weight:800;color:#1d1d1f;white-space:nowrap;">${escapeHtml(school.name)}</div>`,
+                content: `<div style="display:flex;align-items:center;gap:7px;padding:10px 12px;font-size:12px;font-weight:800;color:#1d1d1f;white-space:nowrap;">${emblemHtml}<span>${escapeHtml(school.name)}</span></div>`,
               });
 
               kakao.maps.event.addListener(marker, "click", () => {

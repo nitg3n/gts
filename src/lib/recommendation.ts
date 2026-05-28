@@ -128,7 +128,7 @@ export function rankSchools(
 
   return schoolCandidates
     .filter((school) => school.level === "high")
-    .filter((school) => matchesHardConstraints(school, answer))
+    .filter((school) => matchesHardConstraints(school, answer, context))
     .map((school) => {
       const km = distanceKm(origin, school);
       const distanceScore = scoreDistance(km, answer.distancePreference);
@@ -136,11 +136,15 @@ export function rankSchools(
       const semanticFit = scoreSemanticFit(school, answer, km, context);
       const priorityScore = scorePriorityFit(school, answer, weights);
       const tagScore = scoreTags(school, answer.preferredTags);
-      const preferenceScore = scorePreferenceFit(school, answer);
       const reviewSummary = summarizeReviewsForSchool(school, context.reviews);
       const graduationOutcome = context.graduationOutcomes
         ? findGraduationOutcomeForSchool(school, context.graduationOutcomes)
         : undefined;
+      const preferenceScore = scorePreferenceFit(
+        school,
+        answer,
+        graduationOutcome,
+      );
       const evidence = buildEvidence(
         school,
         km,
@@ -314,7 +318,11 @@ function scoreTags(school: School, preferredTags: string[]) {
   return clamp(52 + matches * 24);
 }
 
-function matchesHardConstraints(school: School, answer: SurveyAnswer) {
+function matchesHardConstraints(
+  school: School,
+  answer: SurveyAnswer,
+  context: RankSchoolsContext = {},
+) {
   if (!matchesStudentGenderEligibility(school, answer.studentGender)) {
     return false;
   }
@@ -331,10 +339,17 @@ function matchesHardConstraints(school: School, answer: SurveyAnswer) {
   }
 
   const explicitCategoryPreference = getExplicitCategoryPreference(answer);
+  const graduationOutcome = context.graduationOutcomes
+    ? findGraduationOutcomeForSchool(school, context.graduationOutcomes)
+    : undefined;
 
   if (
     explicitCategoryPreference &&
-    !categoryMatchesPreference(school.category, explicitCategoryPreference)
+    !categoryMatchesPreferenceWithOutcome(
+      school.category,
+      explicitCategoryPreference,
+      graduationOutcome,
+    )
   ) {
     return false;
   }
@@ -392,11 +407,19 @@ function isOpenCategoryPreference(value: string) {
   return value === "any" || value === "other";
 }
 
-function scorePreferenceFit(school: School, answer: SurveyAnswer) {
+function scorePreferenceFit(
+  school: School,
+  answer: SurveyAnswer,
+  graduationOutcome: GraduationOutcomeSummary | undefined,
+) {
   let score = 70;
 
   if (answer.categoryPreference) {
-    score += categoryMatchesPreference(school.category, answer.categoryPreference)
+    score += categoryMatchesPreferenceWithOutcome(
+      school.category,
+      answer.categoryPreference,
+      graduationOutcome,
+    )
       ? 18
       : -8;
   }
@@ -721,10 +744,15 @@ function getSchoolSemanticProfile(
   km: number,
   context: RankSchoolsContext,
 ): SemanticProfile {
+  const reviewSummary = summarizeReviewsForSchool(school, context.reviews);
+  const graduationOutcome = context.graduationOutcomes
+    ? findGraduationOutcomeForSchool(school, context.graduationOutcomes)
+    : undefined;
   const text = normalizeText(
     [
       school.name,
       school.category,
+      graduationOutcome?.specialPurposeType,
       school.district,
       school.tags.join(" "),
       school.highlights.join(" "),
@@ -735,10 +763,6 @@ function getSchoolSemanticProfile(
   const clubs = getPublicFactValue(school, "clubs");
   const libraryBooks = getPublicFactValue(school, "libraryBooks");
   const studentsPerTeacher = getPublicFactValue(school, "studentsPerTeacher");
-  const reviewSummary = summarizeReviewsForSchool(school, context.reviews);
-  const graduationOutcome = context.graduationOutcomes
-    ? findGraduationOutcomeForSchool(school, context.graduationOutcomes)
-    : undefined;
   const collegeOutcomeScore = scoreGraduationOutcome(
     graduationOutcome?.fourYearRate,
     graduationOutcome,
@@ -1102,7 +1126,11 @@ function buildEvidence(
       dimension: "category_fit",
       label: "희망 고등학교 유형",
       source: "derived",
-      value: categoryMatchesPreference(school.category, explicitCategoryPreference)
+      value: categoryMatchesPreferenceWithOutcome(
+        school.category,
+        explicitCategoryPreference,
+        graduationOutcome,
+      )
         ? "일치"
         : "부분 참고",
       confidence: 0.74,
@@ -1146,6 +1174,16 @@ function buildEvidence(
   });
 
   if (graduationOutcome) {
+    if (graduationOutcome.specialPurposeType) {
+      evidence.push({
+        dimension: "category_fit",
+        label: "학교 유형",
+        source: "kess",
+        value: graduationOutcome.specialPurposeType,
+        confidence: graduationOutcome.confidence,
+      });
+    }
+
     evidence.push(
       {
         dimension: "college_outcome",
@@ -1337,8 +1375,17 @@ function buildReasons(
   evidence: RecommendationEvidence[],
 ) {
   const reasons: string[] = [];
-  const outcomeEvidence = evidence.find((item) => item.source === "kess");
+  const outcomeEvidence = evidence.find(
+    (item) => item.source === "kess" && item.dimension !== "category_fit",
+  );
   const reviewEvidence = evidence.find((item) => item.source === "review");
+  const kessCategoryEvidence = evidence.find(
+    (item) => item.source === "kess" && item.dimension === "category_fit",
+  );
+  const kessCategory =
+    typeof kessCategoryEvidence?.value === "string"
+      ? kessCategoryEvidence.value
+      : undefined;
 
   if (semanticFit.matches.length) {
     reasons.push(
@@ -1353,7 +1400,10 @@ function buildReasons(
 
   if (
     explicitCategoryPreference &&
-    categoryMatchesPreference(school.category, explicitCategoryPreference)
+    (categoryMatchesPreference(school.category, explicitCategoryPreference) ||
+      (kessCategory
+        ? categoryMatchesPreference(kessCategory, explicitCategoryPreference)
+        : false))
   ) {
     reasons.unshift(`${explicitCategoryPreference} 선호와 일치합니다.`);
   }
@@ -1433,6 +1483,20 @@ function buildCaution(
   }
 
   return undefined;
+}
+
+function categoryMatchesPreferenceWithOutcome(
+  category: string,
+  preference: string,
+  graduationOutcome: GraduationOutcomeSummary | undefined,
+) {
+  return (
+    categoryMatchesPreference(category, preference) ||
+    Boolean(
+      graduationOutcome?.specialPurposeType &&
+        categoryMatchesPreference(graduationOutcome.specialPurposeType, preference),
+    )
+  );
 }
 
 function categoryMatchesPreference(category: string, preference: string) {

@@ -27,6 +27,7 @@ import {
   removeSchoolFromCompare,
   saveStoredCompareSchools,
 } from "@/lib/compare-list";
+import { SchoolEmblem } from "@/components/SchoolEmblem";
 import { schools } from "@/lib/schools";
 import type { School } from "@/lib/types";
 
@@ -285,13 +286,16 @@ function SchoolSnapshot({
   return (
     <article className="apple-card p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-extrabold text-[var(--brand-primary)]">
             고등학교
           </p>
-          <h2 className="mt-2 line-clamp-2 break-keep text-xl font-extrabold tracking-normal text-[#1d1d1f]">
-            {school.name}
-          </h2>
+          <div className="mt-2 flex min-w-0 items-start gap-2.5">
+            <SchoolEmblem school={school} size={34} className="mt-0.5" />
+            <h2 className="line-clamp-2 min-w-0 break-keep text-xl font-extrabold tracking-normal text-[#1d1d1f]">
+              {school.name}
+            </h2>
+          </div>
           <p className="mt-1 text-sm font-bold text-[#6e6e73]">
             {school.category} · {school.district}
           </p>
@@ -379,9 +383,12 @@ function FactCell({ children }: { children: ReactNode }) {
 function DecisionNote({ school }: { school: School }) {
   return (
     <article className="apple-card p-5">
-      <h3 className="line-clamp-2 text-lg font-extrabold text-[#1d1d1f]">
-        {school.name}
-      </h3>
+      <div className="flex min-w-0 items-start gap-2.5">
+        <SchoolEmblem school={school} size={30} className="mt-0.5 rounded-lg" />
+        <h3 className="line-clamp-2 min-w-0 text-lg font-extrabold text-[#1d1d1f]">
+          {school.name}
+        </h3>
+      </div>
       <div className="mt-4 space-y-3">
         {school.highlights.slice(0, 3).map((highlight) => (
           <div

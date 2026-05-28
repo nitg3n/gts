@@ -186,6 +186,50 @@ describe("rankSchools", () => {
     ]);
   });
 
+  it("uses KESS special purpose type as hard category evidence", () => {
+    const answer: SurveyAnswer = {
+      distancePreference: "not-important",
+      priorities: ["academics", "activities", "environment"],
+      preferredTags: ["과학"],
+      categoryPreference: "과학고",
+      rawResponses: {
+        categoryPreference: "과학고",
+        careerDirection: "science",
+      },
+    };
+    const graduationOutcomes = createGraduationOutcomeIndex([
+      makeOutcomeRecord("새빛고등학교", 100, 95, 90, 2, 0, "과학고"),
+      makeOutcomeRecord("일반고등학교", 100, 98, 94, 1, 0),
+    ]);
+
+    const ranked = rankSchools(
+      answer,
+      [
+        makeSchool({
+          id: "typed-science",
+          name: "새빛고등학교",
+          category: "일반고",
+          tags: ["과학", "연구"],
+        }),
+        makeSchool({
+          id: "plain-general",
+          name: "일반고등학교",
+          category: "일반고",
+          tags: ["과학", "연구"],
+        }),
+      ],
+      { graduationOutcomes },
+    );
+
+    expect(ranked.map((item) => item.school.id)).toEqual(["typed-science"]);
+    expect(ranked[0].graduationOutcome?.specialPurposeType).toBe("과학고");
+    expect(
+      ranked[0].evidence?.some(
+        (item) => item.source === "kess" && item.value === "과학고",
+      ),
+    ).toBe(true);
+  });
+
   it("uses student gender as eligibility before ranking single-gender schools", () => {
     const answer: SurveyAnswer = {
       studentGender: "female",
@@ -591,12 +635,14 @@ function makeOutcomeRecord(
   fourYear: number,
   juniorCollege: number,
   employment: number,
+  specialPurposeType?: string,
 ) {
   return {
     sido: "서울",
     district: "중구",
     region: "서울 중구",
     school_name: schoolName,
+    special_purpose_type: specialPurposeType ?? null,
     graduation_outcomes: [2023, 2024, 2025].map((year) => ({
       year,
       graduates: { total: graduates },

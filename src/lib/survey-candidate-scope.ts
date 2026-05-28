@@ -50,7 +50,7 @@ export function selectNationwideGraduationCandidates(
   }
 
   return index.all
-    .filter((summary) => matchesExplicitCategory(summary.schoolName, answer))
+    .filter((summary) => matchesExplicitCategory(summary, answer))
     .map((summary) => ({
       summary,
       score: scoreNationwideCandidate(summary, answer),
@@ -79,6 +79,9 @@ function scoreNationwideCandidate(
     summary.employmentRate,
     summary.juniorCollegeRate,
   );
+  const schoolTypeText = normalizeText(
+    `${summary.schoolName} ${summary.specialPurposeType ?? ""}`,
+  );
 
   let score =
     summary.confidence * 18 +
@@ -91,25 +94,25 @@ function scoreNationwideCandidate(
 
   if (careerDirection === "science") {
     score += summary.fourYearRate * 1.45 + summary.advancementRate * 0.3;
-    score += /영재|과학|과학고/.test(summary.schoolName) ? 42 : 0;
+    score += /영재|과학|과학고/.test(schoolTypeText) ? 50 : 0;
   }
 
   if (careerDirection === "global") {
     score += summary.overseasRate * 12 + summary.fourYearRate * 1.1;
-    score += /외국어|국제|외고/.test(summary.schoolName) ? 42 : 0;
+    score += /외국어|국제|외고/.test(schoolTypeText) ? 50 : 0;
   }
 
   if (careerDirection === "practical") {
     score += practicalRate * 1.65;
     score += /마이스터|특성화|공업|상업|디자인|관광|정보|기술|로봇/.test(
-      summary.schoolName,
+      schoolTypeText,
     )
       ? 38
       : 0;
   }
 
   if (careerDirection === "arts-sports") {
-    score += /예술|예고|체육|체고/.test(summary.schoolName) ? 48 : 0;
+    score += /예술|예고|체육|체고/.test(schoolTypeText) ? 56 : 0;
   }
 
   if (activityPreference.includes("career")) {
@@ -124,7 +127,7 @@ function scoreNationwideCandidate(
 }
 
 function matchesExplicitCategory(
-  schoolName: string,
+  summary: GraduationOutcomeSummary,
   answer: SurveyAnswer,
 ) {
   const preference = getExplicitCategoryPreference(answer);
@@ -134,12 +137,14 @@ function matchesExplicitCategory(
   }
 
   const normalizedPreference = normalizeText(preference);
-  const normalizedName = normalizeText(schoolName);
+  const normalizedName = normalizeText(summary.schoolName);
+  const normalizedType = normalizeText(summary.specialPurposeType ?? "");
+  const normalizedCategoryText = `${normalizedName} ${normalizedType}`;
 
   if (/일반고?$/.test(normalizedPreference)) {
     return !/영재|외국어|국제|예술|체육|마이스터|특성화|공업|상업|디자인|관광|정보|기술|로봇/.test(
-      normalizedName,
-    ) && !isKnownGiftedSchoolName(schoolName) && !isScienceHighSchoolName(schoolName);
+      normalizedCategoryText,
+    ) && !isKnownGiftedSchoolName(summary.schoolName) && !isScienceHighSchoolName(summary.schoolName);
   }
 
   if (/자율형?사립|자사|자율/.test(normalizedPreference)) {
@@ -147,35 +152,38 @@ function matchesExplicitCategory(
   }
 
   if (/영재/.test(normalizedPreference)) {
-    return /영재/.test(normalizedName) || isKnownGiftedSchoolName(schoolName);
+    return /영재/.test(normalizedCategoryText) || isKnownGiftedSchoolName(summary.schoolName);
   }
 
   if (/외국어|외고/.test(normalizedPreference)) {
-    return /외국어|외고/.test(normalizedName);
+    return /외국어|외고/.test(normalizedCategoryText);
   }
 
   if (/국제/.test(normalizedPreference)) {
-    return /국제/.test(normalizedName);
+    return /국제/.test(normalizedCategoryText);
   }
 
   if (/과학/.test(normalizedPreference)) {
-    return isScienceHighSchoolName(schoolName);
+    return (
+      /과학고/.test(normalizedType) ||
+      isScienceHighSchoolName(summary.schoolName)
+    );
   }
 
   if (/예술|예고/.test(normalizedPreference)) {
-    return /예술|예고/.test(normalizedName);
+    return /예술|예고/.test(normalizedCategoryText);
   }
 
   if (/체육|체고/.test(normalizedPreference)) {
-    return /체육|체고/.test(normalizedName);
+    return /체육|체고/.test(normalizedCategoryText);
   }
 
   if (/마이스터/.test(normalizedPreference)) {
-    return /마이스터/.test(normalizedName);
+    return /마이스터/.test(normalizedCategoryText);
   }
 
   if (/특성화|공업|상업|디자인|관광|정보|기술|로봇/.test(normalizedPreference)) {
-    return /특성화|공업|상업|디자인|관광|정보|기술|로봇/.test(normalizedName);
+    return /특성화|공업|상업|디자인|관광|정보|기술|로봇/.test(normalizedCategoryText);
   }
 
   return true;

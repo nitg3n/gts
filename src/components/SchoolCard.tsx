@@ -7,6 +7,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { CompareButton } from "@/components/CompareButton";
+import { SchoolEmblem } from "@/components/SchoolEmblem";
 import type { GraduationOutcomeSummary } from "@/lib/graduation-outcomes";
 import { getPublicFactItems } from "@/lib/public-facts";
 import type {
@@ -38,10 +39,17 @@ export function SchoolCard({
   distanceKm,
   reason,
   reasons,
+  graduationOutcome,
   featured = false,
   rankLabel,
 }: SchoolCardProps) {
   const publicFacts = getPublicFactItems(school).slice(0, 3);
+  const displayTags = [
+    graduationOutcome?.specialPurposeType,
+    ...school.tags,
+  ].filter((tag, index, tags): tag is string =>
+    Boolean(tag && tags.indexOf(tag) === index),
+  );
   const reasonItems = reasons?.length
     ? reasons.slice(0, 1)
     : reason
@@ -77,14 +85,17 @@ export function SchoolCard({
                 </span>
               ) : null}
             </div>
-            <h3
-              className={cn(
-                "mt-2 line-clamp-2 break-keep font-extrabold leading-[1.18] tracking-normal text-[#1d1d1f]",
-                featured ? "text-[22px]" : "text-[20px]",
-              )}
-            >
-              {school.name}
-            </h3>
+            <div className="mt-2 flex min-w-0 items-start gap-2.5">
+              <SchoolEmblem school={school} size={34} className="mt-0.5" />
+              <h3
+                className={cn(
+                  "line-clamp-2 min-w-0 break-keep font-extrabold leading-[1.18] tracking-normal text-[#1d1d1f]",
+                  featured ? "text-[22px]" : "text-[20px]",
+                )}
+              >
+                {school.name}
+              </h3>
+            </div>
             <p className="mt-1 text-sm font-bold text-[#6e6e73]">
               {school.category} · {school.district}
             </p>
@@ -94,7 +105,7 @@ export function SchoolCard({
         <FactStrip facts={publicFacts} />
 
         <div className="mt-4 flex flex-wrap gap-1.5">
-          {school.tags.slice(0, 3).map((tag) => (
+          {displayTags.slice(0, 3).map((tag) => (
             <span key={tag} className="apple-chip px-2.5 py-1 text-[12px]">
               {tag}
             </span>

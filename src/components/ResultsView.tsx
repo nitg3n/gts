@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { CompareButton } from "@/components/CompareButton";
+import { SchoolEmblem } from "@/components/SchoolEmblem";
 import { SchoolCard } from "@/components/SchoolCard";
 import {
   getLatestSurveyResult,
@@ -119,7 +120,14 @@ export function ResultsView({ responseId }: { responseId: string }) {
           <div className="apple-panel p-5">
             <p className="text-sm font-extrabold text-[var(--brand-primary)]">추천 요약</p>
             <p className="mt-2 text-xl font-extrabold leading-tight text-[#1d1d1f]">
-              {first?.school.name ?? "-"}
+              {first?.school ? (
+                <span className="flex min-w-0 items-center gap-2">
+                  <SchoolEmblem school={first.school} size={32} />
+                  <span className="min-w-0 break-keep">{first.school.name}</span>
+                </span>
+              ) : (
+                "-"
+              )}
             </p>
             {first?.reasons[0] ? (
               <p className="mt-3 text-sm font-semibold leading-6 text-[#6e6e73]">
@@ -237,8 +245,15 @@ export function ResultsView({ responseId }: { responseId: string }) {
                 #{recommendation.rank}
               </span>
               <span className="min-w-0">
-                <span className="block truncate font-extrabold text-[#1d1d1f]">
-                  {recommendation.school.name}
+                <span className="flex min-w-0 items-center gap-2">
+                  <SchoolEmblem
+                    school={recommendation.school}
+                    size={28}
+                    className="rounded-lg"
+                  />
+                  <span className="block min-w-0 truncate font-extrabold text-[#1d1d1f]">
+                    {recommendation.school.name}
+                  </span>
                 </span>
                 <span className="mt-1 flex items-start gap-2 text-sm font-semibold text-[#6e6e73]">
                   <CheckCircle2

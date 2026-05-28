@@ -67,6 +67,30 @@ describe("survey candidate scope", () => {
     ]);
   });
 
+  it("uses KESS special purpose type when the school name does not expose the type", () => {
+    const answer: SurveyAnswer = {
+      distancePreference: "not-important",
+      priorities: ["academics", "activities", "environment"],
+      preferredTags: ["과학"],
+      categoryPreference: "과학고",
+      rawResponses: {
+        categoryPreference: "과학고",
+        careerDirection: "science",
+      },
+    };
+    const index = createGraduationOutcomeIndex([
+      makeOutcomeRecord("전국일반고등학교", 100, 98, 94, 1, 0),
+      makeOutcomeRecord("새빛고등학교", 100, 95, 90, 2, 0, "과학고"),
+    ]);
+
+    const selected = selectNationwideGraduationCandidates(answer, index, 5);
+
+    expect(selected.map((summary) => summary.schoolName)).toEqual([
+      "새빛고등학교",
+    ]);
+    expect(selected[0].specialPurposeType).toBe("과학고");
+  });
+
   it("treats gifted schools as a distinct nationwide school type", () => {
     const giftedAnswer: SurveyAnswer = {
       distancePreference: "not-important",
@@ -135,12 +159,14 @@ function makeOutcomeRecord(
   fourYear: number,
   juniorCollege: number,
   employment: number,
+  specialPurposeType?: string,
 ) {
   return {
     sido: "전국",
     district: "테스트",
     region: "전국 테스트",
     school_name: schoolName,
+    special_purpose_type: specialPurposeType ?? null,
     graduation_outcomes: [2023, 2024, 2025].map((year) => ({
       year,
       graduates: { total: graduates },

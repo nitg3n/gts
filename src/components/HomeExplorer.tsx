@@ -11,6 +11,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { KakaoMap } from "@/components/KakaoMap";
+import { SchoolEmblem } from "@/components/SchoolEmblem";
 import { SchoolCard } from "@/components/SchoolCard";
 import { SurveyForm } from "@/components/SurveyForm";
 import {
@@ -584,15 +585,22 @@ function RecommendationRankList({
                     기준 위치 {formatDistance(recommendation.distanceKm)}
                   </span>
                 </span>
-                <span
-                  className={cn(
-                    "mt-1 block break-keep font-extrabold leading-[1.22] text-[#1d1d1f]",
-                    isTop
-                      ? "line-clamp-2 text-[1.14rem] sm:text-[1.2rem]"
-                      : "line-clamp-1 text-[1.05rem]",
-                  )}
-                >
-                  {school.name}
+                <span className="mt-1 flex min-w-0 items-start gap-2">
+                  <SchoolEmblem
+                    school={school}
+                    size={isTop ? 30 : 26}
+                    className="mt-0.5 rounded-lg"
+                  />
+                  <span
+                    className={cn(
+                      "block min-w-0 break-keep font-extrabold leading-[1.22] text-[#1d1d1f]",
+                      isTop
+                        ? "line-clamp-2 text-[1.14rem] sm:text-[1.2rem]"
+                        : "line-clamp-1 text-[1.05rem]",
+                    )}
+                  >
+                    {school.name}
+                  </span>
                 </span>
               </span>
               <ArrowRight

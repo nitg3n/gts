@@ -31,12 +31,14 @@ export type GraduationOutcomeRecord = {
   district: string;
   region: string;
   school_name: string;
+  special_purpose_type?: string | null;
   graduation_outcomes: GraduationOutcomeRow[];
 };
 
 export type GraduationOutcomeSummary = {
   schoolName: string;
   region: string;
+  specialPurposeType?: string;
   years: number[];
   latestYear: number;
   graduatesTotal: number;
@@ -191,6 +193,7 @@ function summarizeGraduationOutcome(
   return {
     schoolName: record.school_name,
     region: record.region,
+    specialPurposeType: optionalText(record.special_purpose_type),
     years: outcomes.map((outcome) => outcome.year),
     latestYear: outcomes.at(-1)?.year ?? outcomes[0].year,
     graduatesTotal: totals.graduates,
@@ -223,6 +226,10 @@ function percent(numerator: number, denominator: number) {
 
 function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function optionalText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function normalizeSchoolName(value: string) {
