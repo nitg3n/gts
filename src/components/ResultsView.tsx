@@ -2,19 +2,32 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { CompareButton } from "@/components/CompareButton";
 import { SchoolEmblem } from "@/components/SchoolEmblem";
 import { SchoolCard } from "@/components/SchoolCard";
 import {
   getLatestSurveyResult,
+  getSavedSurveyResults,
   saveLatestSurveyResult,
 } from "@/lib/latest-survey-result";
-import type { StoredSurveyResponse } from "@/lib/types";
+import {
+  getHumanRecommendationReason,
+  getRankDifferenceReason,
+  getRecommendationAdjustmentNotes,
+  getRecommendationConclusion,
+  getRecommendationCriteria,
+  getShortSchoolLine,
+} from "@/lib/recommendation-explainer";
+import { deriveSurveyAnswer, type SurveyResponseMap } from "@/lib/survey";
+import type { StoredSurveyResponse, SurveyAnswer } from "@/lib/types";
 import { formatDistance } from "@/lib/utils";
 
 export function ResultsView({ responseId }: { responseId: string }) {
+  const router = useRouter();
   const [result, setResult] = useState<StoredSurveyResponse>();
+  const [savedResults, setSavedResults] = useState<StoredSurveyResponse[]>([]);
   const [status, setStatus] = useState("추천 결과를 불러오는 중");
 
   useEffect(() => {
@@ -28,6 +41,7 @@ export function ResultsView({ responseId }: { responseId: string }) {
         }
 
         setResult(cachedResult);
+        setSavedResults(getSavedSurveyResults());
         setStatus("추천 결과");
       });
     }
@@ -49,6 +63,7 @@ export function ResultsView({ responseId }: { responseId: string }) {
 
         saveLatestSurveyResult(data);
         setResult(data);
+        setSavedResults(getSavedSurveyResults());
         setStatus("추천 결과");
       })
       .catch(() => {
@@ -70,12 +85,7 @@ export function ResultsView({ responseId }: { responseId: string }) {
 
   if (!result) {
     return (
-      <div className="apple-page grid min-h-[60vh] place-items-center px-4">
-        <div className="text-center">
-          <p className="apple-eyebrow">추천 결과</p>
-          <h1 className="apple-title mt-3 text-3xl">{status}</h1>
-        </div>
-      </div>
+      <ResultLoadingShell status={status} />
     );
   }
 
@@ -85,6 +95,11 @@ export function ResultsView({ responseId }: { responseId: string }) {
   const topThree = recommendations.slice(0, 3);
   const first = topThree[0];
   const compareSchools = topThree.map((item) => item.school);
+  const criteria = getRecommendationCriteria(result.answer);
+  const adjustmentNotes = getRecommendationAdjustmentNotes(result.answer);
+  const previousResults = savedResults
+    .filter((item) => item.id !== result.id)
+    .slice(0, 3);
   const topThreeIds = new Set(topThree.map((item) => item.school.id));
   const expandedRecommendations = recommendations
     .filter(
@@ -129,9 +144,9 @@ export function ResultsView({ responseId }: { responseId: string }) {
                 "-"
               )}
             </p>
-            {first?.reasons[0] ? (
+            {first ? (
               <p className="mt-3 text-sm font-semibold leading-6 text-[#6e6e73]">
-                {first.reasons[0]}
+                {getHumanRecommendationReason(first, result.answer)}
               </p>
             ) : null}
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -173,13 +188,98 @@ export function ResultsView({ responseId }: { responseId: string }) {
       </section>
 
       <section className="apple-shell py-8 lg:py-10">
-        <div className="grid items-stretch gap-5 lg:grid-cols-[1.08fr_1fr_1fr]">
+        {result.persistence?.warning ? <PersistenceNotice /> : null}
+
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr_1fr]">
+          <InsightPanel title="내 조건 요약">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+              {criteria.map((item) => (
+                <div
+                  key={`${item.label}-${item.value}`}
+                  className="rounded-2xl bg-white/70 px-3 py-2.5 ring-1 ring-[#e8e8ed]"
+                >
+                  <p className="text-[11px] font-extrabold text-[#86868b]">
+                    {item.label}
+                  </p>
+                  <p className="mt-1 text-sm font-extrabold leading-5 text-[#1d1d1f]">
+                    {item.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </InsightPanel>
+
+          <InsightPanel title="적용한 추천 기준">
+            <div className="space-y-2">
+              {(adjustmentNotes.length
+                ? adjustmentNotes
+                : ["입학 가능 조건, 학교 유형, 통학 거리, 공식 지표를 함께 비교했습니다."]
+              ).map((note) => (
+                <div
+                  key={note}
+                  className="flex gap-2 rounded-2xl bg-[var(--brand-primary-soft)] px-3 py-2.5 text-sm font-bold leading-5 text-[#1d1d1f]"
+                >
+                  <CheckCircle2
+                    className="mt-0.5 h-4 w-4 flex-none text-[var(--brand-primary)]"
+                    aria-hidden
+                  />
+                  <span>{note}</span>
+                </div>
+              ))}
+            </div>
+          </InsightPanel>
+
+          <InsightPanel title="이전 추천 결과">
+            {previousResults.length ? (
+              <div className="space-y-2">
+                {previousResults.map((item) => (
+                  <Link
+                    key={item.id}
+                    href={`/results/${item.id}`}
+                    className="apple-row-hover block rounded-2xl bg-white/70 px-3 py-2.5 ring-1 ring-[#e8e8ed]"
+                  >
+                    <p className="text-[11px] font-extrabold text-[#86868b]">
+                      {formatSavedDate(item.createdAt)}
+                    </p>
+                    <p className="mt-1 truncate text-sm font-extrabold text-[#1d1d1f]">
+                      {item.recommendations[0]?.school.name ?? "추천 결과"}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm font-semibold leading-6 text-[#6e6e73]">
+                다음 설문부터 최근 결과가 이곳에 저장됩니다.
+              </p>
+            )}
+          </InsightPanel>
+        </div>
+
+        <QuickAdjustPanel
+          result={result}
+          onAdjusted={(nextResult) => {
+            saveLatestSurveyResult(nextResult);
+            setResult(nextResult);
+            setSavedResults(getSavedSurveyResults());
+            router.push(`/results/${nextResult.id}`);
+          }}
+        />
+
+        <RankDifferencePanel
+          answer={result.answer}
+          recommendations={topThree}
+        />
+
+        <div className="mt-6 grid items-stretch gap-5 lg:grid-cols-[1.08fr_1fr_1fr]">
           {topThree.map((recommendation, index) => (
             <SchoolCard
               key={recommendation.school.id}
               school={recommendation.school}
               distanceKm={recommendation.distanceKm}
-              reasons={recommendation.reasons}
+              reasons={[
+                getHumanRecommendationReason(recommendation, result.answer),
+              ]}
+              conclusion={getRecommendationConclusion(recommendation, result.answer)}
               caution={recommendation.caution}
               evidence={recommendation.evidence}
               graduationOutcome={recommendation.graduationOutcome}
@@ -214,7 +314,10 @@ export function ResultsView({ responseId }: { responseId: string }) {
                   key={recommendation.school.id}
                   school={recommendation.school}
                   distanceKm={recommendation.distanceKm}
-                  reasons={recommendation.reasons}
+                  reasons={[
+                    getHumanRecommendationReason(recommendation, result.answer),
+                  ]}
+                  conclusion={getRecommendationConclusion(recommendation, result.answer)}
                   caution={recommendation.caution}
                   evidence={recommendation.evidence}
                   graduationOutcome={recommendation.graduationOutcome}
@@ -260,7 +363,9 @@ export function ResultsView({ responseId }: { responseId: string }) {
                     className="mt-0.5 h-4 w-4 flex-none text-[#34c759]"
                     aria-hidden
                   />
-                  <span className="line-clamp-2">{recommendation.reasons[0]}</span>
+                  <span className="line-clamp-2">
+                    {getShortSchoolLine(recommendation.school)}
+                  </span>
                 </span>
               </span>
               <span className="text-right text-sm font-extrabold text-[#6e6e73] sm:text-left">
@@ -285,6 +390,314 @@ function Pill({ children }: { children: React.ReactNode }) {
   return <span className="apple-chip apple-chip-brand px-3 py-1.5">{children}</span>;
 }
 
+function ResultLoadingShell({ status }: { status: string }) {
+  return (
+    <div className="apple-page">
+      <div className="apple-shell grid min-h-[68vh] place-items-center py-12">
+        <div className="apple-panel w-full max-w-lg p-6">
+          <p className="apple-eyebrow">추천 결과</p>
+          <h1 className="mt-3 text-2xl font-extrabold tracking-normal text-[#1d1d1f]">
+            {status}
+          </h1>
+          <div className="mt-6 grid gap-3">
+            {[0, 1, 2].map((item) => (
+              <div
+                key={item}
+                className="rounded-2xl border border-[#e8e8ed] bg-white/70 p-4"
+              >
+                <div className="h-3 w-24 animate-pulse rounded-full bg-[#e8e8ed]" />
+                <div className="mt-3 h-5 w-2/3 animate-pulse rounded-full bg-[#dfe8e1]" />
+                <div className="mt-3 h-3 w-full animate-pulse rounded-full bg-[#f1f1f4]" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PersistenceNotice() {
+  return (
+    <div className="apple-panel mb-5 border-[rgba(255,159,10,0.24)] bg-[#fffaf0] p-4">
+      <p className="text-sm font-extrabold text-[#9a5b00]">
+        서버 저장 상태 확인 필요
+      </p>
+      <p className="mt-1 text-sm font-semibold leading-6 text-[#6e6e73]">
+        결과는 이 브라우저에 보관되어 바로 사용할 수 있습니다. 다른 기기에서도 이어 보려면 서버 저장 설정을 확인해야 합니다.
+      </p>
+    </div>
+  );
+}
+
+const categoryOptions = [
+  ["any", "아직 미정"],
+  ["일반고", "일반고"],
+  ["특성화고", "특성화고"],
+  ["자율형 사립고", "자율형 사립고"],
+  ["외국어고", "외국어고"],
+  ["영재학교", "영재학교"],
+  ["과학고", "과학고"],
+  ["예술고", "예술고"],
+  ["체육고", "체육고"],
+  ["마이스터고", "마이스터고"],
+];
+
+const genderTypeOptions = [
+  ["any", "상관없음"],
+  ["coed-separated", "공학"],
+  ["coed-class-separated", "공학 분반"],
+  ["single-gender", "남학교 또는 여학교"],
+];
+
+const careerOptions = [
+  ["undecided", "진로 미정"],
+  ["college", "대학 진학"],
+  ["science", "과학·공학·연구"],
+  ["global", "외국어·국제"],
+  ["practical", "실습·취업·기술"],
+  ["arts-sports", "예술·체육"],
+];
+
+const distanceOptions = [
+  ["near", "가까운 통학"],
+  ["balanced", "통학·적합도 균형"],
+  ["not-important", "거리 상관없음"],
+];
+
+function QuickAdjustPanel({
+  result,
+  onAdjusted,
+}: {
+  result: StoredSurveyResponse;
+  onAdjusted: (result: StoredSurveyResponse) => void;
+}) {
+  const answer = result.answer;
+  const raw = answer.rawResponses ?? {};
+  const [category, setCategory] = useState(
+    typeof raw.categoryPreference === "string" ? raw.categoryPreference : "any",
+  );
+  const [genderType, setGenderType] = useState(() => {
+    if (typeof raw.genderPreference === "string") {
+      return raw.genderPreference;
+    }
+
+    return answer.genderPreference === "coed"
+      ? "coed-separated"
+      : answer.genderPreference ?? "any";
+  });
+  const [career, setCareer] = useState(
+    typeof raw.careerDirection === "string" ? raw.careerDirection : "undecided",
+  );
+  const [distance, setDistance] =
+    useState<SurveyAnswer["distancePreference"]>(answer.distancePreference);
+  const [status, setStatus] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function submitAdjustedSurvey() {
+    setIsSubmitting(true);
+    setStatus("새 조건으로 계산 중");
+
+    const nextResponses: SurveyResponseMap = {
+      ...raw,
+      categoryPreference: category,
+      genderPreference: genderType,
+      careerDirection: career,
+      studentGender: raw.studentGender ?? answer.studentGender,
+      ...distanceResponseValues(distance),
+    };
+    const location =
+      typeof answer.lat === "number" && typeof answer.lng === "number"
+        ? { lat: answer.lat, lng: answer.lng }
+        : undefined;
+    const nextAnswer = deriveSurveyAnswer(nextResponses, location);
+
+    try {
+      const response = await fetch("/api/survey-responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(nextAnswer),
+      });
+      const data = (await response.json()) as StoredSurveyResponse & {
+        message?: string;
+      };
+
+      if (!response.ok || !Array.isArray(data.recommendations)) {
+        throw new Error(data.message ?? "추천을 다시 계산하지 못했습니다.");
+      }
+
+      onAdjusted(data);
+      setStatus("새 추천 결과로 이동했습니다.");
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "추천을 다시 계산하지 못했습니다.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="apple-panel mt-6 p-4 sm:p-5">
+      <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div>
+          <p className="text-sm font-extrabold text-[var(--brand-primary)]">
+            조건 빠르게 조정
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <QuickSelect
+              label="학교 유형"
+              value={category}
+              options={categoryOptions}
+              onChange={setCategory}
+            />
+            <QuickSelect
+              label="통학 기준"
+              value={distance}
+              options={distanceOptions}
+              onChange={(value) =>
+                setDistance(value as SurveyAnswer["distancePreference"])
+              }
+            />
+            <QuickSelect
+              label="성별 유형"
+              value={genderType}
+              options={genderTypeOptions}
+              onChange={setGenderType}
+            />
+            <QuickSelect
+              label="진로 방향"
+              value={career}
+              options={careerOptions}
+              onChange={setCareer}
+            />
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 lg:w-48">
+          <button
+            type="button"
+            onClick={submitAdjustedSurvey}
+            disabled={isSubmitting}
+            className="apple-button-primary h-11 px-4 text-sm"
+          >
+            {isSubmitting ? "계산 중" : "추천 다시 계산"}
+          </button>
+          {status ? (
+            <p className="text-xs font-bold leading-5 text-[#86868b]">
+              {status}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RankDifferencePanel({
+  answer,
+  recommendations,
+}: {
+  answer: SurveyAnswer;
+  recommendations: StoredSurveyResponse["recommendations"];
+}) {
+  if (recommendations.length < 2) {
+    return null;
+  }
+
+  const first = recommendations[0];
+
+  return (
+    <section className="apple-panel mt-6 p-4 sm:p-5">
+      <p className="text-sm font-extrabold text-[var(--brand-primary)]">
+        순위 차이
+      </p>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {recommendations.map((recommendation) => (
+          <div
+            key={recommendation.school.id}
+            className="rounded-2xl bg-white/70 p-3 ring-1 ring-[#e8e8ed]"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <SchoolEmblem
+                school={recommendation.school}
+                size={28}
+                className="rounded-lg"
+              />
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold text-[var(--brand-primary)]">
+                  {recommendation.rank}위
+                </p>
+                <p className="truncate text-sm font-extrabold text-[#1d1d1f]">
+                  {recommendation.school.name}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 text-sm font-semibold leading-6 text-[#6e6e73]">
+              {getRankDifferenceReason(recommendation, first, answer)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function QuickSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[][];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-extrabold text-[#6e6e73]">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="apple-field mt-1 h-11 w-full px-3 text-sm"
+      >
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={optionValue} value={optionValue}>
+            {optionLabel}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function distanceResponseValues(
+  value: SurveyAnswer["distancePreference"],
+): Pick<SurveyResponseMap, "commuteImportance" | "commuteTime"> {
+  if (value === "near") {
+    return {
+      commuteImportance: 5,
+      commuteTime: "near",
+    };
+  }
+
+  if (value === "not-important") {
+    return {
+      commuteImportance: 1,
+      commuteTime: "any",
+    };
+  }
+
+  return {
+    commuteImportance: 3,
+    commuteTime: "balanced",
+  };
+}
+
 function HeroMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl bg-white/70 px-3 py-3 ring-1 ring-[#e8e8ed]">
@@ -293,6 +706,23 @@ function HeroMetric({ label, value }: { label: string; value: string }) {
         {value}
       </div>
     </div>
+  );
+}
+
+function InsightPanel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="apple-panel p-4 sm:p-5">
+      <h2 className="text-sm font-extrabold text-[var(--brand-primary)]">
+        {title}
+      </h2>
+      <div className="mt-3">{children}</div>
+    </section>
   );
 }
 
@@ -320,4 +750,19 @@ function distanceLabel(value: StoredSurveyResponse["answer"]["distancePreference
     return "상관없음";
   }
   return "균형";
+}
+
+function formatSavedDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "저장된 결과";
+  }
+
+  return date.toLocaleDateString("ko-KR", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

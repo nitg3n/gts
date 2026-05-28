@@ -73,6 +73,25 @@ const stepMeta: Record<StepId, Omit<SurveyStep, "id" | "questions">> = {
   },
 };
 
+const submitStages = [
+  {
+    title: "응답 조건 확인 중",
+    description: "성별, 학교 유형, 통학 기준처럼 반드시 반영해야 하는 조건을 먼저 정리합니다.",
+  },
+  {
+    title: "후보 학교 탐색 중",
+    description: "선택한 위치와 거리 기준에 맞춰 실제 학교 후보를 찾고 있습니다.",
+  },
+  {
+    title: "학교 데이터 연결 중",
+    description: "NEIS, 학교알리미, 졸업 후 데이터를 추천 기준에 맞게 대조합니다.",
+  },
+  {
+    title: "추천 결과 정리 중",
+    description: "가장 설명 가능한 1, 2, 3순위와 추가 후보를 정리하고 있습니다.",
+  },
+];
+
 export function SurveyForm({
   onComplete,
   submitLabel = "추천 결과 보기",
@@ -90,6 +109,7 @@ export function SurveyForm({
   const [draftAccuracy, setDraftAccuracy] = useState<number>();
   const [status, setStatus] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submitStageIndex, setSubmitStageIndex] = useState(0);
   const [locationSource, setLocationSource] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
   const [touchedQuestions, setTouchedQuestions] = useState<Set<string>>(
@@ -131,6 +151,20 @@ export function SurveyForm({
       })
       .catch(() => setStatus("기본 설문으로 진행합니다."));
   }, []);
+
+  useEffect(() => {
+    if (!submitting) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setSubmitStageIndex((current) =>
+        Math.min(current + 1, submitStages.length - 1),
+      );
+    }, 700);
+
+    return () => window.clearInterval(interval);
+  }, [submitting]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -230,9 +264,6 @@ export function SurveyForm({
   }, [draftAccuracy, draftLocation]);
 
   async function submitSurvey() {
-    setSubmitting(true);
-    setStatus("추천을 계산하는 중");
-
     const missingQuestion = findFirstUnansweredQuestion(
       visibleQuestions,
       responses,
@@ -260,40 +291,52 @@ export function SurveyForm({
       return;
     }
 
+    setSubmitting(true);
+    setSubmitStageIndex(0);
+    setStatus("추천 결과를 준비하는 중입니다.");
+
     const answer = deriveSurveyAnswer(responses, location, survey);
-    const response = await fetch("/api/survey-responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(answer),
-    });
 
-    const data = (await response.json()) as Partial<StoredSurveyResponse> & {
-      message?: string;
-    };
+    try {
+      setSubmitStageIndex(1);
+      const response = await fetch("/api/survey-responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(answer),
+      });
+      setSubmitStageIndex(3);
 
-    if (
-      !response.ok ||
-      !data.id ||
-      !data.answer ||
-      !data.createdAt ||
-      !Array.isArray(data.recommendations)
-    ) {
-      setStatus(data.message ?? "추천 계산에 실패했습니다.");
+      const data = (await response.json()) as Partial<StoredSurveyResponse> & {
+        message?: string;
+      };
+
+      if (
+        !response.ok ||
+        !data.id ||
+        !data.answer ||
+        !data.createdAt ||
+        !Array.isArray(data.recommendations)
+      ) {
+        setStatus(data.message ?? "추천 계산에 실패했습니다.");
+        setSubmitting(false);
+        return;
+      }
+
+      saveLatestSurveyResult(data as StoredSurveyResponse);
+
+      if (onComplete) {
+        onComplete(data.id);
+        setSubmitting(false);
+        return;
+      }
+
+      router.push(`/results/${data.id}`);
+    } catch {
+      setStatus("추천 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
       setSubmitting(false);
-      return;
     }
-
-    saveLatestSurveyResult(data as StoredSurveyResponse);
-
-    if (onComplete) {
-      onComplete(data.id);
-      setSubmitting(false);
-      return;
-    }
-
-    router.push(`/results/${data.id}`);
   }
 
   function moveStep(direction: -1 | 1) {
@@ -304,6 +347,7 @@ export function SurveyForm({
 
   return (
     <div className="apple-page">
+      {submitting ? <SubmitProgressOverlay stageIndex={submitStageIndex} /> : null}
       <div className="apple-shell grid gap-8 py-8 lg:grid-cols-[340px_minmax(0,1fr)] lg:py-12">
         <aside className="lg:sticky lg:top-24 lg:self-start">
           <div className="apple-panel p-6">
@@ -444,6 +488,65 @@ export function SurveyForm({
             </div>
           </div>
         </main>
+      </div>
+    </div>
+  );
+}
+
+function SubmitProgressOverlay({ stageIndex }: { stageIndex: number }) {
+  const safeIndex = Math.min(Math.max(stageIndex, 0), submitStages.length - 1);
+  const stage = submitStages[safeIndex];
+  const progress = ((safeIndex + 1) / submitStages.length) * 100;
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#f5f5f7]/82 px-4 backdrop-blur-xl">
+      <div
+        className="apple-panel w-full max-w-md p-6"
+        role="status"
+        aria-live="polite"
+      >
+        <p className="apple-eyebrow">추천 생성</p>
+        <h2 className="mt-3 text-2xl font-extrabold tracking-normal text-[#1d1d1f]">
+          {stage.title}
+        </h2>
+        <p className="mt-3 text-sm font-semibold leading-6 text-[#6e6e73]">
+          {stage.description}
+        </p>
+
+        <div className="mt-6 h-2 overflow-hidden rounded-full bg-[#e8e8ed]">
+          <div
+            className="h-full rounded-full bg-[var(--brand-primary)] transition-all duration-500"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+
+        <ol className="mt-5 grid gap-2">
+          {submitStages.map((item, index) => {
+            const done = index <= safeIndex;
+
+            return (
+              <li
+                key={item.title}
+                className={cn(
+                  "flex items-center gap-2 text-sm font-extrabold",
+                  done ? "text-[var(--brand-primary)]" : "text-[#a1a1a6]",
+                )}
+              >
+                <span
+                  className={cn(
+                    "grid h-5 w-5 place-items-center rounded-full text-[11px]",
+                    done
+                      ? "bg-[var(--brand-primary)] text-white"
+                      : "bg-white text-[#a1a1a6] ring-1 ring-[#e8e8ed]",
+                  )}
+                >
+                  {index + 1}
+                </span>
+                {item.title}
+              </li>
+            );
+          })}
+        </ol>
       </div>
     </div>
   );

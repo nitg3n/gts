@@ -7,11 +7,15 @@ import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   ArrowRightLeft,
+  BookOpen,
   CheckCircle2,
   ExternalLink,
+  GraduationCap,
   MapPin,
   Scale,
+  Sparkles,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -136,6 +140,8 @@ export function CompareView({ ids }: { ids?: string }) {
             />
           ))}
         </div>
+
+        <ComparisonQuestionCards schools={selected} />
 
         <div className="apple-panel mt-8 overflow-hidden">
           <div className="border-b border-[var(--line)] bg-white/50 px-5 py-4">
@@ -326,6 +332,129 @@ function SchoolSnapshot({
       </Link>
     </article>
   );
+}
+
+function ComparisonQuestionCards({ schools }: { schools: School[] }) {
+  const questions = buildComparisonQuestions(schools);
+
+  return (
+    <section className="mt-8">
+      <div className="mb-4">
+        <p className="apple-eyebrow">질문으로 비교</p>
+        <h2 className="mt-2 text-xl font-extrabold tracking-normal text-[#1d1d1f]">
+          선택할 때 실제로 물어볼 것들.
+        </h2>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-4">
+        {questions.map((question) => (
+          <article key={question.title} className="apple-card p-4">
+            <div className="flex items-center gap-2 text-sm font-extrabold text-[var(--brand-primary)]">
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-[var(--brand-primary-soft)] [&>svg]:h-4 [&>svg]:w-4">
+                {question.icon}
+              </span>
+              {question.title}
+            </div>
+            <p className="mt-3 text-lg font-extrabold leading-tight text-[#1d1d1f]">
+              {question.school ? question.school.name : "추가 확인 필요"}
+            </p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-[#6e6e73]">
+              {question.body}
+            </p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+type ComparisonQuestion = {
+  title: string;
+  icon: ReactNode;
+  school?: School;
+  body: string;
+};
+
+function buildComparisonQuestions(schools: School[]): ComparisonQuestion[] {
+  const academic = pickBestSchool(schools, (school) => school.metrics.academics);
+  const clubs = pickBestSchool(
+    schools,
+    (school) => getPublicFactValue(school, "clubs"),
+  );
+  const dailyLoad = pickBestSchool(
+    schools,
+    (school) => {
+      const studentsPerTeacher = getPublicFactValue(school, "studentsPerTeacher");
+      const studentsPerClass = getPublicFactValue(school, "studentsPerClass");
+
+      if (!studentsPerTeacher && !studentsPerClass) {
+        return undefined;
+      }
+
+      return (
+        100 -
+        (studentsPerTeacher ?? 18) * 2.2 -
+        (studentsPerClass ?? 25) * 0.55
+      );
+    },
+  );
+  const library = pickBestSchool(
+    schools,
+    (school) => getPublicFactValue(school, "libraryBooks"),
+  );
+
+  return [
+    {
+      title: "학업 분위기",
+      icon: <GraduationCap aria-hidden />,
+      school: academic?.school,
+      body: academic
+        ? `학업 지표 ${Math.round(academic.value)}점을 기준으로 가장 강합니다.`
+        : "공식 학업 지표가 충분하지 않습니다.",
+    },
+    {
+      title: "활동 선택지",
+      icon: <Sparkles aria-hidden />,
+      school: clubs?.school,
+      body: clubs
+        ? `공시 기준 동아리 ${formatNumber(clubs.value)}개로 비교 후보 중 가장 많습니다.`
+        : "동아리 공시값이 있는 학교가 없습니다.",
+    },
+    {
+      title: "생활 부담",
+      icon: <Users aria-hidden />,
+      school: dailyLoad?.school,
+      body: dailyLoad
+        ? "학급당 학생 수와 교원 1인당 학생 수를 함께 봤을 때 가장 여유가 있습니다."
+        : "학생 수 대비 교원·학급 지표가 부족합니다.",
+    },
+    {
+      title: "독서·자료",
+      icon: <BookOpen aria-hidden />,
+      school: library?.school,
+      body: library
+        ? `도서관 장서 ${formatNumber(library.value)}권으로 자료 접근성이 가장 높습니다.`
+        : "도서관 장서 공시값이 있는 학교가 없습니다.",
+    },
+  ];
+}
+
+function pickBestSchool(
+  schools: School[],
+  getScore: (school: School) => number | undefined,
+) {
+  return schools
+    .map((school) => ({ school, value: getScore(school) }))
+    .filter(
+      (item): item is { school: School; value: number } =>
+        typeof item.value === "number" && Number.isFinite(item.value),
+    )
+    .sort((a, b) => b.value - a.value)[0];
+}
+
+function formatNumber(value: number) {
+  return value.toLocaleString("ko-KR", {
+    maximumFractionDigits: 0,
+  });
 }
 
 function MiniFact({

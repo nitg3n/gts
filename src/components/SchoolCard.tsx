@@ -22,6 +22,7 @@ type SchoolCardProps = {
   distanceKm?: number;
   reason?: string;
   reasons?: string[];
+  conclusion?: string;
   caution?: string;
   evidence?: RecommendationEvidence[];
   graduationOutcome?: GraduationOutcomeSummary;
@@ -39,6 +40,7 @@ export function SchoolCard({
   distanceKm,
   reason,
   reasons,
+  conclusion,
   graduationOutcome,
   featured = false,
   rankLabel,
@@ -99,6 +101,11 @@ export function SchoolCard({
             <p className="mt-1 text-sm font-bold text-[#6e6e73]">
               {school.category} · {school.district}
             </p>
+            {conclusion ? (
+              <p className="mt-3 line-clamp-2 text-sm font-semibold leading-6 text-[#4f4f55]">
+                {conclusion}
+              </p>
+            ) : null}
           </div>
         </div>
 

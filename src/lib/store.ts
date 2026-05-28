@@ -5,7 +5,12 @@ import { fetchLiveSchoolBySlug } from "@/lib/live-schools";
 import { loadGraduationOutcomeIndex } from "@/lib/graduation-outcomes";
 import { getSchoolById, schools } from "@/lib/schools";
 import { normalizeSchoolIdParam } from "@/lib/school-slug";
-import { hasPersistentDatabase, queryPersistentStore } from "@/lib/persistence";
+import {
+  describePersistenceResult,
+  hasPersistentDatabase,
+  queryPersistentStore,
+  rememberPersistenceWarning,
+} from "@/lib/persistence";
 import { surveys as defaultSurveys } from "@/data/surveys";
 import type { CleanSurvey, SurveyQuestion } from "@/data/surveys";
 import type {
@@ -93,7 +98,7 @@ export function getCachedSchool(id: string) {
 export async function getSchoolByRouteId(id: string) {
   const cached = getCachedSchool(id);
 
-  if (cached) {
+  if (cached && hasDetailedSchoolFacts(cached)) {
     return cached;
   }
 
@@ -103,7 +108,18 @@ export async function getSchoolByRouteId(id: string) {
     cacheSchools([liveSchool]);
   }
 
-  return liveSchool;
+  return liveSchool ?? cached;
+}
+
+function hasDetailedSchoolFacts(school: School) {
+  return (
+    Boolean(school.disclosure) ||
+    school.facts.students > 0 ||
+    school.facts.classes > 0 ||
+    school.facts.teachers > 0 ||
+    school.facts.clubs > 0 ||
+    school.facts.libraryBooks > 0
+  );
 }
 
 export async function listSurveyDefinitions() {
@@ -202,9 +218,12 @@ export async function saveSurveyAnswer(
   };
 
   getStore().surveyResponses.set(id, stored);
-  await writePersistentSurveyResponse(stored);
+  const persisted = await writePersistentSurveyResponse(stored);
 
-  return stored;
+  return {
+    ...stored,
+    persistence: describePersistenceResult(persisted),
+  };
 }
 
 export async function getSurveyResult(id: string) {
@@ -291,9 +310,12 @@ export async function createReview(
   };
 
   getStore().reviews.unshift(newReview);
-  await writePersistentReview(newReview);
+  const persisted = await writePersistentReview(newReview);
 
-  return newReview;
+  return {
+    review: newReview,
+    persistence: describePersistenceResult(persisted),
+  };
 }
 
 export async function updateReviewStatus(id: string, status: SchoolReview["status"]) {
@@ -392,7 +414,7 @@ async function writePersistentSurveyDefinition(
 }
 
 async function writePersistentSurveyResponse(response: StoredSurveyResponse) {
-  await writePersistent(async () => {
+  return writePersistent(async () => {
     await queryPersistentStore(
       `
         insert into public.gts_survey_responses
@@ -491,7 +513,7 @@ async function getRecommendationReviews() {
 }
 
 async function writePersistentReview(review: SchoolReview) {
-  await writePersistent(async () => {
+  return writePersistent(async () => {
     await queryPersistentStore(
       `
         insert into public.gts_reviews
@@ -737,6 +759,7 @@ function logPersistentStoreError(error: unknown) {
     detail.includes(".supabase.co")
       ? " Supabase direct DB hosts can require IPv6. Use the Supavisor pooler connection string in SUPABASE_DATABASE_URL or POSTGRES_URL."
       : "";
+  rememberPersistenceWarning(`${detail}${hint}`);
 
   console.warn(`[gts:persistence] ${detail}${hint}`);
 }

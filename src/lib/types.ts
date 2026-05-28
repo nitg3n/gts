@@ -168,9 +168,17 @@ export type StoredSurveyResponse = {
   createdAt: string;
   recommendations: Recommendation[];
   source?: SchoolDataSource;
+  persistence?: PersistenceState;
 };
 
 export type ReviewStatus = "pending" | "approved" | "rejected";
+
+export type PersistenceState = {
+  enabled: boolean;
+  persisted: boolean;
+  mode: "database" | "memory";
+  warning?: string;
+};
 
 export type SchoolReview = {
   id: string;

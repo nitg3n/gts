@@ -184,18 +184,52 @@ export function rankSchools(
         caution: buildCaution(km, answer, semanticFit.score),
       };
     })
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => compareRecommendations(a, b, answer))
     .map((recommendation, index) => ({
       ...recommendation,
       rank: index + 1,
     }));
 }
 
+function compareRecommendations(
+  a: Omit<Recommendation, "rank">,
+  b: Omit<Recommendation, "rank">,
+  answer: SurveyAnswer,
+) {
+  if (answer.distancePreference === "near") {
+    const matchTypeDifference =
+      matchTypePriority(a.matchType) - matchTypePriority(b.matchType);
+
+    if (matchTypeDifference !== 0) {
+      return matchTypeDifference;
+    }
+  }
+
+  return (
+    b.score - a.score ||
+    (a.distanceKm ?? Number.POSITIVE_INFINITY) -
+      (b.distanceKm ?? Number.POSITIVE_INFINITY)
+  );
+}
+
+function matchTypePriority(matchType: Recommendation["matchType"]) {
+  if (matchType === "nearby") {
+    return 0;
+  }
+
+  if (matchType === "balanced") {
+    return 1;
+  }
+
+  return 2;
+}
+
 export function schoolMatchesRecommendationConstraints(
   school: School,
   answer: SurveyAnswer,
+  context: RankSchoolsContext = {},
 ) {
-  return matchesHardConstraints(school, answer);
+  return matchesHardConstraints(school, answer, context);
 }
 
 function deriveWeights(answer: SurveyAnswer): WeightMap {

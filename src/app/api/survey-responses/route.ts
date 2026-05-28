@@ -10,11 +10,15 @@ import {
 import { loadGraduationOutcomeIndex } from "@/lib/graduation-outcomes";
 import {
   getSurveyCandidateScope,
+  type SurveyCandidateScope,
   selectNationwideGraduationCandidates,
 } from "@/lib/survey-candidate-scope";
 import type { School, SurveyAnswer } from "@/lib/types";
 
 export const runtime = "nodejs";
+
+const minimumRecommendationCount = 3;
+const supplementalCandidateLimit = 6;
 
 export async function POST(request: Request) {
   try {
@@ -49,16 +53,20 @@ export async function POST(request: Request) {
             candidateScope.nationwideSchoolLimit,
           )
         : [];
-    const candidates = uniqueSchools([
-      ...(liveResult?.schools ?? []),
-      ...nationwideSchools,
-    ]);
+    const candidates = await ensureMinimumCandidateSchools({
+      answer,
+      candidateScope,
+      schools: uniqueSchools([
+        ...(liveResult?.schools ?? []),
+        ...nationwideSchools,
+      ]),
+    });
     const usedLiveCandidateSearch =
       hasLocation || candidateScope.nationwideSchoolLimit > 0;
     const result = await saveSurveyAnswer(
       answer,
       candidates.length ? candidates : usedLiveCandidateSearch ? [] : undefined,
-      usedLiveCandidateSearch ? "kakao-neis" : undefined,
+      candidates.length || usedLiveCandidateSearch ? "kakao-neis" : undefined,
     );
 
     return Response.json(result);
@@ -68,6 +76,35 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+}
+
+async function ensureMinimumCandidateSchools({
+  answer,
+  candidateScope,
+  schools,
+}: {
+  answer: SurveyAnswer;
+  candidateScope: SurveyCandidateScope;
+  schools: School[];
+}) {
+  const graduationOutcomes = loadGraduationOutcomeIndex();
+  const eligibleCount = schools.filter((school) =>
+    schoolMatchesRecommendationConstraints(school, answer, {
+      graduationOutcomes,
+    }),
+  ).length;
+
+  if (eligibleCount >= minimumRecommendationCount) {
+    return schools;
+  }
+
+  const supplementarySchools = await fetchNationwideCandidateSchools(
+    answer,
+    Math.max(candidateScope.nationwideSummaryLimit, 180),
+    Math.max(minimumRecommendationCount - eligibleCount, supplementalCandidateLimit),
+  );
+
+  return uniqueSchools([...schools, ...supplementarySchools]);
 }
 
 async function fetchNationwideCandidateSchools(
@@ -86,8 +123,12 @@ async function fetchNationwideCandidateSchools(
       schoolName: summary.schoolName,
       region: summary.region,
       level: "high",
+      includeDisclosureFacts: false,
     }).then((school) =>
-      school && schoolMatchesRecommendationConstraints(school, answer)
+      school &&
+      schoolMatchesRecommendationConstraints(school, answer, {
+        graduationOutcomes,
+      })
         ? school
         : undefined,
     ),

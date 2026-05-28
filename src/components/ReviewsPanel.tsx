@@ -9,7 +9,7 @@ import {
   School,
   Star,
 } from "lucide-react";
-import type { SchoolReview } from "@/lib/types";
+import type { PersistenceState, SchoolReview } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ratingLabels: Array<{
@@ -31,6 +31,29 @@ const defaultRatings: SchoolReview["ratings"] = {
   activities: 4,
   facilities: 4,
 };
+
+const reviewPrompts = [
+  {
+    label: "수업·시험",
+    text: "수업 난이도와 시험 준비 분위기는 ",
+  },
+  {
+    label: "친구·분위기",
+    text: "반 분위기와 친구 관계는 ",
+  },
+  {
+    label: "동아리·행사",
+    text: "동아리와 학교 행사는 ",
+  },
+  {
+    label: "급식·시설",
+    text: "급식과 학교 시설은 ",
+  },
+  {
+    label: "신입생 적응",
+    text: "처음 입학했을 때 적응 과정은 ",
+  },
+];
 
 type ReviewFilter = "all" | SchoolReview["relation"];
 
@@ -74,39 +97,60 @@ export function ReviewsPanel({
     setIsSubmitting(true);
     setStatus("리뷰를 저장하는 중입니다.");
 
-    const response = await fetch("/api/reviews", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        schoolId,
-        authorName: authorName.trim() || "익명 학생",
-        relation,
-        enrolledYear,
-        graduatedYear: relation === "graduate" ? graduatedYear : undefined,
-        ratings,
-        body: trimmedBody,
-      }),
-    });
+    try {
+      const response = await fetch("/api/reviews", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          schoolId,
+          authorName: authorName.trim() || "익명 학생",
+          relation,
+          enrolledYear,
+          graduatedYear: relation === "graduate" ? graduatedYear : undefined,
+          ratings,
+          body: trimmedBody,
+        }),
+      });
 
-    const data = (await response.json()) as {
-      review?: SchoolReview;
-      message?: string;
-    };
+      const data = (await response.json()) as {
+        review?: SchoolReview;
+        persistence?: PersistenceState;
+        message?: string;
+      };
 
-    setIsSubmitting(false);
+      if (!response.ok || !data.review) {
+        setStatus(data.message ?? "리뷰 저장에 실패했습니다.");
+        return;
+      }
 
-    if (!response.ok || !data.review) {
-      setStatus(data.message ?? "리뷰 저장에 실패했습니다.");
-      return;
+      setStatus(
+        data.persistence?.warning
+          ? "리뷰는 공개됐지만 서버 저장 상태를 확인해야 합니다."
+          : "리뷰가 바로 공개되었습니다.",
+      );
+      setReviews((current) => [data.review!, ...current]);
+      setBody("");
+      setRatings(defaultRatings);
+      setFilter("all");
+    } catch {
+      setStatus("리뷰 저장에 실패했습니다. 네트워크 상태를 확인해 주세요.");
+    } finally {
+      setIsSubmitting(false);
     }
+  }
 
-    setStatus("리뷰가 바로 공개되었습니다.");
-    setReviews((current) => [data.review!, ...current]);
-    setBody("");
-    setRatings(defaultRatings);
-    setFilter("all");
+  function applyReviewPrompt(text: string) {
+    setBody((current) => {
+      const trimmed = current.trimEnd();
+
+      if (!trimmed) {
+        return text;
+      }
+
+      return `${trimmed}\n${text}`;
+    });
   }
 
   return (
@@ -284,6 +328,24 @@ export function ReviewsPanel({
             ))}
           </div>
 
+          <div className="mt-4">
+            <p className="text-xs font-extrabold text-[#6e6e73]">
+              무엇을 적을까요?
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {reviewPrompts.map((prompt) => (
+                <button
+                  key={prompt.label}
+                  type="button"
+                  onClick={() => applyReviewPrompt(prompt.text)}
+                  className="rounded-full border border-[#e8e8ed] bg-white/78 px-3 py-1.5 text-xs font-extrabold text-[#4f4f55] transition hover:border-[rgba(70,138,87,0.28)] hover:bg-[var(--brand-primary-soft)] hover:text-[var(--brand-primary)]"
+                >
+                  {prompt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <label className="mt-4 block">
             <span className="text-xs font-extrabold text-[#6e6e73]">
               리뷰 내용
@@ -291,7 +353,7 @@ export function ReviewsPanel({
             <textarea
               value={body}
               onChange={(event) => setBody(event.target.value)}
-              placeholder="학교 분위기, 시험 준비, 급식, 동아리, 시설처럼 직접 겪은 점을 적어주세요."
+              placeholder="좋았던 점과 아쉬웠던 점을 함께 적어주세요. 예: 시험 기간 분위기, 선생님 상담, 급식, 동아리, 신입생 적응"
               className="mt-1 min-h-36 w-full resize-y rounded-[20px] border border-[#d2d2d7] bg-white/90 p-3 text-sm font-semibold leading-6 outline-none transition placeholder:text-[#a1a1a6] focus:border-[var(--brand-primary)] focus:ring-4 focus:ring-[var(--brand-primary-ring)]"
             />
           </label>

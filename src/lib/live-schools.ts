@@ -91,6 +91,7 @@ type SchoolNameSearchParams = {
   schoolName: string;
   region?: string;
   level?: SchoolLevel;
+  includeDisclosureFacts?: boolean;
 };
 
 export type NearbySchoolSearchResult = {
@@ -252,6 +253,7 @@ export async function fetchLiveSchoolByName({
   schoolName,
   region,
   level = "high",
+  includeDisclosureFacts = true,
 }: SchoolNameSearchParams) {
   const kakaoRestKey = process.env.KAKAO_REST_API_KEY;
 
@@ -291,11 +293,13 @@ export async function fetchLiveSchoolByName({
         fetchNeisSchoolInfo(place.place_name, inferredLevel),
       ),
     );
-    const disclosureFacts = await Promise.all(
-      filteredPlaces.map(({ place, inferredLevel }, index) =>
-        fetchSchoolDisclosureFacts(place, inferredLevel!, neisRows[index]),
-      ),
-    );
+    const disclosureFacts = includeDisclosureFacts
+      ? await Promise.all(
+          filteredPlaces.map(({ place, inferredLevel }, index) =>
+            fetchSchoolDisclosureFacts(place, inferredLevel!, neisRows[index]),
+          ),
+        )
+      : filteredPlaces.map(() => undefined);
     const schools = ensureUniqueSchoolSlugs(
       filteredPlaces
         .map(({ place, inferredLevel }, index) =>

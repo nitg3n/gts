@@ -7,7 +7,9 @@ export type LatestSurveyResult = {
 };
 
 const storageKey = "gts:latest-survey-response:v1";
+const historyStorageKey = "gts:survey-result-history:v1";
 const maxAgeMs = 1000 * 60 * 60 * 24 * 30;
+const maxHistoryItems = 8;
 
 export function getLatestSurveyResponseId() {
   return getLatestSurveyRecord()?.responseId;
@@ -88,6 +90,7 @@ export function saveLatestSurveyResponseId(
 
 export function saveLatestSurveyResult(result: StoredSurveyResponse) {
   saveLatestSurveyResponseId(result.id, result);
+  saveSurveyResultToHistory(result);
 }
 
 export function clearLatestSurveyResponseId() {
@@ -96,6 +99,77 @@ export function clearLatestSurveyResponseId() {
   }
 
   window.localStorage.removeItem(storageKey);
+}
+
+export function getSavedSurveyResults() {
+  if (!canUseLocalStorage()) {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(historyStorageKey);
+
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      clearSavedSurveyResults();
+      return [];
+    }
+
+    const cutoff = Date.now() - maxAgeMs;
+
+    return parsed
+      .filter(isStoredSurveyHistoryItem)
+      .filter((item) => Date.parse(item.savedAt) >= cutoff)
+      .map((item) => item.result);
+  } catch {
+    clearSavedSurveyResults();
+    return [];
+  }
+}
+
+export function clearSavedSurveyResults() {
+  if (!canUseLocalStorage()) {
+    return;
+  }
+
+  window.localStorage.removeItem(historyStorageKey);
+}
+
+function saveSurveyResultToHistory(result: StoredSurveyResponse) {
+  if (!canUseLocalStorage()) {
+    return;
+  }
+
+  const savedAt = new Date().toISOString();
+  const current = getSavedSurveyResults();
+  const next = [
+    { responseId: result.id, savedAt, result },
+    ...current
+      .filter((item) => item.id !== result.id)
+      .slice(0, maxHistoryItems - 1)
+      .map((item) => ({
+        responseId: item.id,
+        savedAt: item.createdAt,
+        result: item,
+      })),
+  ];
+
+  try {
+    window.localStorage.setItem(historyStorageKey, JSON.stringify(next));
+  } catch {
+    const compact = next.slice(0, 3);
+
+    try {
+      window.localStorage.setItem(historyStorageKey, JSON.stringify(compact));
+    } catch {
+      window.localStorage.removeItem(historyStorageKey);
+    }
+  }
 }
 
 function canUseLocalStorage() {
@@ -114,5 +188,22 @@ function isStoredSurveyResponse(value: unknown): value is StoredSurveyResponse {
     typeof candidate.createdAt === "string" &&
     Boolean(candidate.answer) &&
     Array.isArray(candidate.recommendations)
+  );
+}
+
+function isStoredSurveyHistoryItem(
+  value: unknown,
+): value is LatestSurveyResult & { result: StoredSurveyResponse } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<LatestSurveyResult>;
+  const savedAt = Date.parse(candidate.savedAt ?? "");
+
+  return (
+    typeof candidate.responseId === "string" &&
+    Number.isFinite(savedAt) &&
+    isStoredSurveyResponse(candidate.result)
   );
 }

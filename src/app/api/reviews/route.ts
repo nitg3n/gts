@@ -54,12 +54,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const review = await createReview({
+    const { review, persistence } = await createReview({
       ...body,
       authorId: "public-reviewer",
     });
 
-    return Response.json({ review }, { status: 201 });
+    return Response.json({ review, persistence }, { status: 201 });
   } catch (error) {
     return Response.json(
       errorResponse("리뷰 입력값을 확인해주세요.", error),
