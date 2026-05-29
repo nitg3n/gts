@@ -333,6 +333,16 @@ export function HomeExplorer() {
       <section className="apple-section">
         <div className="apple-shell grid max-w-[88rem] gap-6 py-8 lg:min-h-[500px] lg:grid-cols-[250px_minmax(420px,560px)_minmax(330px,400px)] lg:items-center lg:gap-7 xl:gap-9">
           <div className="flex flex-col justify-center">
+            <a
+              href="https://docs.google.com/forms/d/e/1FAIpQLSds5GVKRUvHpCC9ZNXu28qFoUa9qoFktwhShTilKZxdlAGYdA/viewform"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="apple-button-primary mt-5 h-11 w-fit gap-2 px-5 mb-5 text-sm inline-flex items-center"
+            >
+              <h1 className="text-[0.25rem] leading-none tracking-normal text-[#ffffff] sm:text-[1rem]">
+              사용 후기 설문하러 가기
+              </h1>
+            </a>
             <h1 className="text-[2rem] font-extrabold leading-none tracking-normal text-[#1d1d1f] sm:text-[2.35rem]">
               학교로GO
             </h1>
