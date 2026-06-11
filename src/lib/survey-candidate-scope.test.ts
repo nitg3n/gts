@@ -41,6 +41,34 @@ describe("survey candidate scope", () => {
     expect(scope.nationwideSchoolLimit).toBe(0);
   });
 
+  it("limits distance-free answers to the broad region unless nationwide expansion is checked", () => {
+    const localAnswer: SurveyAnswer = {
+      distancePreference: "not-important",
+      priorities: ["academics", "activities", "environment"],
+      preferredTags: [],
+      rawResponses: {
+        commuteTime: "any",
+        nationwideExpansion: false,
+      },
+    };
+    const nationalAnswer: SurveyAnswer = {
+      ...localAnswer,
+      rawResponses: {
+        commuteTime: "any",
+        nationwideExpansion: true,
+      },
+    };
+
+    expect(getSurveyCandidateScope(localAnswer).regionalSchoolLimit).toBeGreaterThan(
+      0,
+    );
+    expect(getSurveyCandidateScope(localAnswer).nationwideSchoolLimit).toBe(0);
+    expect(getSurveyCandidateScope(nationalAnswer).regionalSchoolLimit).toBe(0);
+    expect(
+      getSurveyCandidateScope(nationalAnswer).nationwideSchoolLimit,
+    ).toBeGreaterThan(0);
+  });
+
   it("selects nationwide college-outcome candidates independent of local distance", () => {
     const answer: SurveyAnswer = {
       distancePreference: "not-important",

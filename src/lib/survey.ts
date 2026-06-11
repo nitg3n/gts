@@ -2,7 +2,7 @@ import { schoolSelectionSurvey } from "@/data/surveys";
 import type { CleanSurvey, SurveyQuestion } from "@/data/surveys";
 import type { SchoolMetricKey, SurveyAnswer } from "@/lib/types";
 
-export type SurveyResponseValue = string | string[] | number;
+export type SurveyResponseValue = string | string[] | number | boolean;
 export type SurveyResponseMap = Record<string, SurveyResponseValue | undefined>;
 
 export function getDefaultSurveyResponses(
@@ -16,6 +16,10 @@ export function getDefaultSurveyResponses(
 
       if (question.type === "multi") {
         return [[question.id, []]];
+      }
+
+      if (question.defaultValue !== undefined) {
+        return [[question.id, question.defaultValue]];
       }
 
       return [];

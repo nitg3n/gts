@@ -8,6 +8,7 @@ describe("deriveSurveyAnswer", () => {
     expect(answer.distancePreference).toBe("balanced");
     expect(answer.priorities).toHaveLength(3);
     expect(answer.studentGender).toBeUndefined();
+    expect(answer.rawResponses?.nationwideExpansion).toBe(false);
   });
 
   it("keeps the student's gender as a hard recommendation input", () => {

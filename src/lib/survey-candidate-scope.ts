@@ -3,11 +3,14 @@ import type {
   GraduationOutcomeSummary,
 } from "@/lib/graduation-outcomes";
 import { getCommuteDistanceLimitKm } from "@/lib/commute";
+import { isSameBroadRegion } from "@/lib/korean-regions";
 import type { SurveyAnswer } from "@/lib/types";
 
 export type SurveyCandidateScope = {
   nearbyRadiusKm: number;
   nearbyLimit: number;
+  regionalSummaryLimit: number;
+  regionalSchoolLimit: number;
   nationwideSummaryLimit: number;
   nationwideSchoolLimit: number;
 };
@@ -24,25 +27,49 @@ export function getSurveyCandidateScope(
     return constrainScopeByCommuteLimit(answerOrPreference, {
       nearbyRadiusKm: 20,
       nearbyLimit: 45,
+      regionalSummaryLimit: 0,
+      regionalSchoolLimit: 0,
       nationwideSummaryLimit: 0,
       nationwideSchoolLimit: 0,
     });
   }
 
   if (distancePreference === "not-important") {
+    if (
+      typeof answerOrPreference !== "string" &&
+      !isNationwideExpansionEnabled(answerOrPreference)
+    ) {
+      return {
+        nearbyRadiusKm: 20,
+        nearbyLimit: 20,
+        regionalSummaryLimit: 180,
+        regionalSchoolLimit: 45,
+        nationwideSummaryLimit: 0,
+        nationwideSchoolLimit: 0,
+      };
+    }
+
     return {
       nearbyRadiusKm: 20,
       nearbyLimit: 0,
+      regionalSummaryLimit: 0,
+      regionalSchoolLimit: 0,
       nationwideSummaryLimit: 240,
       nationwideSchoolLimit: 60,
     };
   }
 
+  const allowsNationwide =
+    typeof answerOrPreference === "string" ||
+    isNationwideExpansionEnabled(answerOrPreference);
+
   return constrainScopeByCommuteLimit(answerOrPreference, {
     nearbyRadiusKm: 20,
     nearbyLimit: 45,
-    nationwideSummaryLimit: 80,
-    nationwideSchoolLimit: 24,
+    regionalSummaryLimit: allowsNationwide ? 0 : 100,
+    regionalSchoolLimit: allowsNationwide ? 0 : 24,
+    nationwideSummaryLimit: allowsNationwide ? 80 : 0,
+    nationwideSchoolLimit: allowsNationwide ? 24 : 0,
   });
 }
 
@@ -63,6 +90,8 @@ function constrainScopeByCommuteLimit(
   return {
     ...scope,
     nearbyRadiusKm: Math.min(scope.nearbyRadiusKm, commuteLimitKm),
+    regionalSummaryLimit: 0,
+    regionalSchoolLimit: 0,
     nationwideSummaryLimit: 0,
     nationwideSchoolLimit: 0,
   };
@@ -72,12 +101,18 @@ export function selectNationwideGraduationCandidates(
   answer: SurveyAnswer,
   index: GraduationOutcomeIndex,
   limit: number,
+  options: { broadRegion?: string } = {},
 ) {
   if (limit <= 0 || index.all.length === 0) {
     return [];
   }
 
   return index.all
+    .filter(
+      (summary) =>
+        !options.broadRegion ||
+        isSameBroadRegion(summary.region, options.broadRegion),
+    )
     .filter((summary) => matchesExplicitCategory(summary, answer))
     .map((summary) => ({
       summary,
@@ -86,6 +121,10 @@ export function selectNationwideGraduationCandidates(
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map(({ summary }) => summary);
+}
+
+export function isNationwideExpansionEnabled(answer: SurveyAnswer) {
+  return answer.rawResponses?.nationwideExpansion === true;
 }
 
 function scoreNationwideCandidate(

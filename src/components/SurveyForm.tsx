@@ -131,8 +131,9 @@ export function SurveyForm({
   const activeStep = steps[safeStepIndex];
   const answeredCount =
     visibleQuestions.filter((question) =>
-      touchedQuestions.has(question.id) &&
-      isAnswered(question, responses[question.id]),
+      (!question.required && isAnswered(question, responses[question.id])) ||
+      (touchedQuestions.has(question.id) &&
+        isAnswered(question, responses[question.id])),
     ).length + (location ? 1 : 0);
   const totalCount = visibleQuestions.length + 1;
   const progress = Math.round((answeredCount / totalCount) * 100);
@@ -596,6 +597,10 @@ function isAnswered(question: SurveyQuestion, value: SurveyResponseValue | undef
     return Array.isArray(value) && value.length > 0;
   }
 
+  if (question.type === "checkbox") {
+    return typeof value === "boolean";
+  }
+
   return value !== undefined && value !== "";
 }
 
@@ -679,8 +684,56 @@ function QuestionBlock({
             onChange={onChange}
           />
         ) : null}
+
+        {question.type === "checkbox" ? (
+          <CheckboxInput
+            checked={value === true}
+            onChange={() => onChange(value === true ? false : true)}
+          />
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function CheckboxInput({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-2xl border px-4 py-4 text-left transition",
+        checked
+          ? "border-[var(--brand-primary)] bg-[var(--brand-primary-soft)]"
+          : "border-[var(--line-strong)] bg-white/78 hover:border-[rgba(70,138,87,0.42)] hover:bg-[var(--brand-primary-soft)]",
+      )}
+      aria-pressed={checked}
+    >
+      <span
+        className={cn(
+          "grid h-6 w-6 shrink-0 place-items-center rounded-lg border transition",
+          checked
+            ? "border-[var(--brand-primary)] bg-[var(--brand-primary)] text-white"
+            : "border-[#d2d2d7] bg-white text-transparent",
+        )}
+      >
+        <Check className="h-4 w-4" aria-hidden />
+      </span>
+      <span>
+        <span className="block text-sm font-extrabold text-[#1d1d1f]">
+          전국 후보 포함
+        </span>
+        <span className="mt-1 block text-xs font-bold leading-5 text-[#6e6e73]">
+          거주 예정 지역 밖의 학교까지 함께 비교합니다.
+        </span>
+      </span>
+    </button>
   );
 }
 

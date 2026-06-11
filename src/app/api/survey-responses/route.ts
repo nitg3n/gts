@@ -1,4 +1,5 @@
 import {
+  fetchBroadRegionForLocation,
   fetchLiveSchoolByName,
   fetchNearbyLiveSchools,
 } from "@/lib/live-schools";
@@ -11,10 +12,12 @@ import { loadGraduationOutcomeIndex } from "@/lib/graduation-outcomes";
 import { hasCommuteDistanceLimit } from "@/lib/commute";
 import {
   getSurveyCandidateScope,
+  isNationwideExpansionEnabled,
   type SurveyCandidateScope,
   selectNationwideGraduationCandidates,
 } from "@/lib/survey-candidate-scope";
 import { getSpecialSchoolCandidateNames } from "@/lib/special-school-candidates";
+import { isSameBroadRegion, normalizeBroadRegionName } from "@/lib/korean-regions";
 import type { School, SurveyAnswer } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -37,6 +40,9 @@ export async function POST(request: Request) {
     const lng = answer.lng;
     const hasLocation = typeof lat === "number" && typeof lng === "number";
     const candidateScope = getSurveyCandidateScope(answer);
+    const broadRegion = hasLocation
+      ? await fetchBroadRegionForLocation({ lat, lng })
+      : undefined;
     const liveResult =
       hasLocation && candidateScope.nearbyLimit > 0
         ? await fetchNearbyLiveSchools({
@@ -47,6 +53,17 @@ export async function POST(request: Request) {
             limit: candidateScope.nearbyLimit,
           })
         : undefined;
+    const resolvedBroadRegion =
+      broadRegion ?? inferBroadRegionFromSchools(liveResult?.schools ?? []);
+    const regionalSchools =
+      candidateScope.regionalSchoolLimit > 0 && resolvedBroadRegion
+        ? await fetchRegionalCandidateSchools(
+            answer,
+            resolvedBroadRegion,
+            candidateScope.regionalSummaryLimit,
+            candidateScope.regionalSchoolLimit,
+          )
+        : [];
     const nationwideSchools =
       candidateScope.nationwideSchoolLimit > 0
         ? await fetchNationwideCandidateSchools(
@@ -58,18 +75,22 @@ export async function POST(request: Request) {
     const specialTypeSchools = await fetchSpecialTypeCandidateSchools(
       answer,
       candidateScope,
+      resolvedBroadRegion,
     );
     const candidates = await ensureMinimumCandidateSchools({
       answer,
       candidateScope,
       schools: uniqueSchools([
         ...(liveResult?.schools ?? []),
+        ...regionalSchools,
         ...specialTypeSchools,
         ...nationwideSchools,
       ]),
     });
     const usedLiveCandidateSearch =
-      hasLocation || candidateScope.nationwideSchoolLimit > 0;
+      hasLocation ||
+      candidateScope.regionalSchoolLimit > 0 ||
+      candidateScope.nationwideSchoolLimit > 0;
     const result = await saveSurveyAnswer(
       answer,
       candidates.length ? candidates : usedLiveCandidateSearch ? [] : undefined,
@@ -151,9 +172,43 @@ async function fetchNationwideCandidateSchools(
   return schools;
 }
 
+async function fetchRegionalCandidateSchools(
+  answer: SurveyAnswer,
+  broadRegion: string,
+  summaryLimit: number,
+  schoolLimit: number,
+) {
+  const graduationOutcomes = loadGraduationOutcomeIndex();
+  const summaries = selectNationwideGraduationCandidates(
+    answer,
+    graduationOutcomes,
+    summaryLimit,
+    { broadRegion },
+  );
+  const schools = await collectWithConcurrency(summaries, 8, schoolLimit, (summary) =>
+    fetchLiveSchoolByName({
+      schoolName: summary.schoolName,
+      region: summary.region,
+      level: "high",
+      includeDisclosureFacts: false,
+    }).then((school) =>
+      school &&
+      schoolMatchesBroadRegion(school, broadRegion) &&
+      schoolMatchesRecommendationConstraints(school, answer, {
+        graduationOutcomes,
+      })
+        ? school
+        : undefined,
+    ),
+  );
+
+  return schools;
+}
+
 async function fetchSpecialTypeCandidateSchools(
   answer: SurveyAnswer,
   candidateScope: SurveyCandidateScope,
+  broadRegion: string | undefined,
 ) {
   const names = getSpecialSchoolCandidateNames(answer);
 
@@ -161,10 +216,20 @@ async function fetchSpecialTypeCandidateSchools(
     return [];
   }
 
+  const allowNationwide = isNationwideExpansionEnabled(answer);
+
+  if (!allowNationwide && !broadRegion) {
+    return [];
+  }
+
   const graduationOutcomes = loadGraduationOutcomeIndex();
   const targetCount = Math.min(
     names.length,
-    Math.max(minimumRecommendationCount, candidateScope.nationwideSchoolLimit),
+    Math.max(
+      minimumRecommendationCount,
+      candidateScope.regionalSchoolLimit,
+      candidateScope.nationwideSchoolLimit,
+    ),
   );
 
   return collectWithConcurrency(names, 6, targetCount, (schoolName) =>
@@ -174,12 +239,26 @@ async function fetchSpecialTypeCandidateSchools(
       includeDisclosureFacts: false,
     }).then((school) =>
       school &&
+      (allowNationwide ||
+        (broadRegion && schoolMatchesBroadRegion(school, broadRegion))) &&
       schoolMatchesRecommendationConstraints(school, answer, {
         graduationOutcomes,
       })
         ? school
         : undefined,
     ),
+  );
+}
+
+function schoolMatchesBroadRegion(school: School, broadRegion: string) {
+  return isSameBroadRegion(`${school.district} ${school.address}`, broadRegion);
+}
+
+function inferBroadRegionFromSchools(schools: School[]) {
+  const school = schools.find((item) => item.address || item.district);
+
+  return normalizeBroadRegionName(
+    school ? `${school.district} ${school.address}` : undefined,
   );
 }
 

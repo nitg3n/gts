@@ -1,6 +1,12 @@
 import type { SchoolMetricKey } from "@/lib/types";
 
-export type SurveyQuestionType = "hidden" | "section" | "single" | "multi" | "scale";
+export type SurveyQuestionType =
+  | "hidden"
+  | "section"
+  | "single"
+  | "multi"
+  | "scale"
+  | "checkbox";
 
 export type SurveyStepId = "profile" | "fit" | "priorities" | "commute";
 
@@ -23,7 +29,7 @@ export type SurveyQuestion = {
   max?: number;
   minLabel?: string;
   maxLabel?: string;
-  defaultValue?: string | string[] | number;
+  defaultValue?: string | string[] | number | boolean;
   weightTargets?: Array<SchoolMetricKey | "distance">;
 };
 
@@ -264,6 +270,15 @@ export const highSchoolSelectionSurvey: CleanSurvey = {
         { id: "commute-50", label: "40-50분", value: "far-ok" },
         { id: "commute-any", label: "상관없음", value: "any" },
       ],
+    },
+    {
+      id: "nationwideExpansion",
+      type: "checkbox",
+      step: "commute",
+      title: "전국 단위로 확대",
+      description:
+        "체크하지 않으면 추천은 기준 위치가 속한 광역지자체 안에서 우선 계산됩니다.",
+      defaultValue: false,
     },
     {
       id: "commuteMethod",

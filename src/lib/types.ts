@@ -143,7 +143,7 @@ export type SurveyAnswer = {
   preferredTags: string[];
   genderPreference?: "single-gender" | "coed" | "any";
   categoryPreference?: string;
-  rawResponses?: Record<string, string | string[] | number>;
+  rawResponses?: Record<string, string | string[] | number | boolean>;
 };
 
 export type Recommendation = {

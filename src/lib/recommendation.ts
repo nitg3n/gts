@@ -41,7 +41,10 @@ export const surveyAnswerSchema = z.object({
   genderPreference: z.enum(["single-gender", "coed", "any"]).optional(),
   categoryPreference: z.string().optional(),
   rawResponses: z
-    .record(z.string(), z.union([z.string(), z.number(), z.array(z.string())]))
+    .record(
+      z.string(),
+      z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+    )
     .optional(),
 });
 

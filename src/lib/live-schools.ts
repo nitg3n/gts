@@ -15,6 +15,7 @@ import {
   normalizeSchoolIdParam,
   schoolNameFromSlug,
 } from "@/lib/school-slug";
+import { normalizeBroadRegionName } from "@/lib/korean-regions";
 
 type KakaoPlace = {
   id: string;
@@ -40,6 +41,8 @@ type KakaoRegionResponse = {
   documents?: Array<{
     code?: string;
     region_type?: string;
+    region_1depth_name?: string;
+    region_2depth_name?: string;
   }>;
 };
 
@@ -244,6 +247,49 @@ export async function fetchLiveSchoolBySlug(id: string) {
       schools.find((school) => normalizeSchoolName(school.name) === schoolName) ??
       schools[0]
     );
+  } catch {
+    return undefined;
+  }
+}
+
+export async function fetchBroadRegionForLocation({
+  lat,
+  lng,
+}: {
+  lat: number;
+  lng: number;
+}) {
+  const restKey = process.env.KAKAO_REST_API_KEY;
+
+  if (!restKey || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(KAKAO_COORD2REGION_URL);
+    url.search = new URLSearchParams({
+      x: String(lng),
+      y: String(lat),
+    }).toString();
+
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        Authorization: `KakaoAK ${restKey}`,
+      },
+      signal: AbortSignal.timeout(2500),
+    });
+
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const data = (await response.json()) as KakaoRegionResponse;
+    const region =
+      data.documents?.find((document) => document.region_type === "B") ??
+      data.documents?.[0];
+
+    return normalizeBroadRegionName(region?.region_1depth_name);
   } catch {
     return undefined;
   }

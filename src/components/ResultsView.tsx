@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2 } from "lucide-react";
 import { CompareButton } from "@/components/CompareButton";
 import { SchoolEmblem } from "@/components/SchoolEmblem";
 import { SchoolCard } from "@/components/SchoolCard";
@@ -23,7 +23,7 @@ import {
 import { deriveSurveyAnswer, type SurveyResponseMap } from "@/lib/survey";
 import type { StoredSurveyResponse, SurveyAnswer } from "@/lib/types";
 import { getStoredUserLocation } from "@/lib/user-location";
-import { formatDistance } from "@/lib/utils";
+import { cn, formatDistance } from "@/lib/utils";
 
 export function ResultsView({ responseId }: { responseId: string }) {
   const router = useRouter();
@@ -516,6 +516,9 @@ function QuickAdjustPanel({
   const [commuteMethod, setCommuteMethod] = useState(
     typeof raw.commuteMethod === "string" ? raw.commuteMethod : "transit",
   );
+  const [nationwideExpansion, setNationwideExpansion] = useState(
+    raw.nationwideExpansion === true,
+  );
   const [status, setStatus] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -533,6 +536,7 @@ function QuickAdjustPanel({
       studentGender: raw.studentGender ?? answer.studentGender,
       commuteTime: nextCommuteTime,
       commuteMethod,
+      nationwideExpansion,
     };
     const storedLocation = getStoredUserLocation();
     const location =
@@ -614,6 +618,11 @@ function QuickAdjustPanel({
               value={commuteMethod}
               options={commuteMethodOptions}
               onChange={setCommuteMethod}
+            />
+            <QuickCheckbox
+              label="전국 확대"
+              checked={nationwideExpansion}
+              onChange={() => setNationwideExpansion((current) => !current)}
             />
             <QuickSelect
               label="성별 유형"
@@ -723,6 +732,45 @@ function QuickSelect({
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+function QuickCheckbox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-extrabold text-[#6e6e73]">{label}</span>
+      <button
+        type="button"
+        onClick={onChange}
+        className={cn(
+          "mt-1 flex h-11 w-full items-center gap-2 rounded-[14px] px-3 text-left text-sm font-extrabold ring-1 transition",
+          checked
+            ? "bg-[var(--brand-primary-soft)] text-[var(--brand-primary)] ring-[rgba(70,138,87,0.28)]"
+            : "bg-white text-[#1d1d1f] ring-[#d2d2d7] hover:bg-[var(--brand-primary-soft)]",
+        )}
+        aria-pressed={checked}
+      >
+        <span
+          className={cn(
+            "grid h-5 w-5 place-items-center rounded-md border",
+            checked
+              ? "border-[var(--brand-primary)] bg-[var(--brand-primary)] text-white"
+              : "border-[#d2d2d7] bg-white text-transparent",
+          )}
+        >
+          <Check className="h-3.5 w-3.5" aria-hidden />
+        </span>
+        포함
+      </button>
     </label>
   );
 }
