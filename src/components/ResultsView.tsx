@@ -22,6 +22,7 @@ import {
 } from "@/lib/recommendation-explainer";
 import { deriveSurveyAnswer, type SurveyResponseMap } from "@/lib/survey";
 import type { StoredSurveyResponse, SurveyAnswer } from "@/lib/types";
+import { getStoredUserLocation } from "@/lib/user-location";
 import { formatDistance } from "@/lib/utils";
 
 export function ResultsView({ responseId }: { responseId: string }) {
@@ -465,6 +466,22 @@ const distanceOptions = [
   ["not-important", "거리 상관없음"],
 ];
 
+const commuteTimeOptions = [
+  ["very-near", "10분 이내"],
+  ["near", "10-20분"],
+  ["balanced", "20-30분"],
+  ["far-ok", "40-50분"],
+  ["any", "상관없음"],
+];
+
+const commuteMethodOptions = [
+  ["transit", "대중교통"],
+  ["walk", "도보"],
+  ["bike", "자전거"],
+  ["car", "차량"],
+  ["any", "미정"],
+];
+
 function QuickAdjustPanel({
   result,
   onAdjusted,
@@ -491,6 +508,14 @@ function QuickAdjustPanel({
   );
   const [distance, setDistance] =
     useState<SurveyAnswer["distancePreference"]>(answer.distancePreference);
+  const [commuteTime, setCommuteTime] = useState(
+    typeof raw.commuteTime === "string"
+      ? raw.commuteTime
+      : defaultCommuteTime(distance),
+  );
+  const [commuteMethod, setCommuteMethod] = useState(
+    typeof raw.commuteMethod === "string" ? raw.commuteMethod : "transit",
+  );
   const [status, setStatus] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -498,18 +523,31 @@ function QuickAdjustPanel({
     setIsSubmitting(true);
     setStatus("새 조건으로 계산 중");
 
+    const nextCommuteTime = distance === "not-important" ? "any" : commuteTime;
     const nextResponses: SurveyResponseMap = {
       ...raw,
+      ...distanceResponseValues(distance),
       categoryPreference: category,
       genderPreference: genderType,
       careerDirection: career,
       studentGender: raw.studentGender ?? answer.studentGender,
-      ...distanceResponseValues(distance),
+      commuteTime: nextCommuteTime,
+      commuteMethod,
     };
+    const storedLocation = getStoredUserLocation();
     const location =
       typeof answer.lat === "number" && typeof answer.lng === "number"
         ? { lat: answer.lat, lng: answer.lng }
+        : storedLocation
+          ? { lat: storedLocation.lat, lng: storedLocation.lng }
         : undefined;
+
+    if (!location) {
+      setStatus("저장된 기준 위치가 없어 위치를 다시 선택해야 합니다.");
+      setIsSubmitting(false);
+      return;
+    }
+
     const nextAnswer = deriveSurveyAnswer(nextResponses, location);
 
     try {
@@ -548,7 +586,7 @@ function QuickAdjustPanel({
           <p className="text-sm font-extrabold text-[var(--brand-primary)]">
             조건 빠르게 조정
           </p>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <QuickSelect
               label="학교 유형"
               value={category}
@@ -559,9 +597,23 @@ function QuickAdjustPanel({
               label="통학 기준"
               value={distance}
               options={distanceOptions}
-              onChange={(value) =>
-                setDistance(value as SurveyAnswer["distancePreference"])
-              }
+              onChange={(value) => {
+                const nextDistance = value as SurveyAnswer["distancePreference"];
+                setDistance(nextDistance);
+                setCommuteTime(defaultCommuteTime(nextDistance));
+              }}
+            />
+            <QuickSelect
+              label="통학 시간"
+              value={commuteTime}
+              options={commuteTimeOptions}
+              onChange={setCommuteTime}
+            />
+            <QuickSelect
+              label="통학 방식"
+              value={commuteMethod}
+              options={commuteMethodOptions}
+              onChange={setCommuteMethod}
             />
             <QuickSelect
               label="성별 유형"
@@ -696,6 +748,18 @@ function distanceResponseValues(
     commuteImportance: 3,
     commuteTime: "balanced",
   };
+}
+
+function defaultCommuteTime(value: SurveyAnswer["distancePreference"]) {
+  if (value === "near") {
+    return "near";
+  }
+
+  if (value === "not-important") {
+    return "any";
+  }
+
+  return "balanced";
 }
 
 function HeroMetric({ label, value }: { label: string; value: string }) {

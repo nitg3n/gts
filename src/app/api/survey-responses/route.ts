@@ -8,11 +8,13 @@ import {
   surveyAnswerSchema,
 } from "@/lib/recommendation";
 import { loadGraduationOutcomeIndex } from "@/lib/graduation-outcomes";
+import { hasCommuteDistanceLimit } from "@/lib/commute";
 import {
   getSurveyCandidateScope,
   type SurveyCandidateScope,
   selectNationwideGraduationCandidates,
 } from "@/lib/survey-candidate-scope";
+import { getSpecialSchoolCandidateNames } from "@/lib/special-school-candidates";
 import type { School, SurveyAnswer } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -34,7 +36,7 @@ export async function POST(request: Request) {
     const lat = answer.lat;
     const lng = answer.lng;
     const hasLocation = typeof lat === "number" && typeof lng === "number";
-    const candidateScope = getSurveyCandidateScope(answer.distancePreference);
+    const candidateScope = getSurveyCandidateScope(answer);
     const liveResult =
       hasLocation && candidateScope.nearbyLimit > 0
         ? await fetchNearbyLiveSchools({
@@ -53,11 +55,16 @@ export async function POST(request: Request) {
             candidateScope.nationwideSchoolLimit,
           )
         : [];
+    const specialTypeSchools = await fetchSpecialTypeCandidateSchools(
+      answer,
+      candidateScope,
+    );
     const candidates = await ensureMinimumCandidateSchools({
       answer,
       candidateScope,
       schools: uniqueSchools([
         ...(liveResult?.schools ?? []),
+        ...specialTypeSchools,
         ...nationwideSchools,
       ]),
     });
@@ -98,6 +105,13 @@ async function ensureMinimumCandidateSchools({
     return schools;
   }
 
+  if (
+    candidateScope.nationwideSchoolLimit <= 0 ||
+    hasCommuteDistanceLimit(answer)
+  ) {
+    return schools;
+  }
+
   const supplementarySchools = await fetchNationwideCandidateSchools(
     answer,
     Math.max(candidateScope.nationwideSummaryLimit, 180),
@@ -135,6 +149,38 @@ async function fetchNationwideCandidateSchools(
   );
 
   return schools;
+}
+
+async function fetchSpecialTypeCandidateSchools(
+  answer: SurveyAnswer,
+  candidateScope: SurveyCandidateScope,
+) {
+  const names = getSpecialSchoolCandidateNames(answer);
+
+  if (names.length === 0) {
+    return [];
+  }
+
+  const graduationOutcomes = loadGraduationOutcomeIndex();
+  const targetCount = Math.min(
+    names.length,
+    Math.max(minimumRecommendationCount, candidateScope.nationwideSchoolLimit),
+  );
+
+  return collectWithConcurrency(names, 6, targetCount, (schoolName) =>
+    fetchLiveSchoolByName({
+      schoolName,
+      level: "high",
+      includeDisclosureFacts: false,
+    }).then((school) =>
+      school &&
+      schoolMatchesRecommendationConstraints(school, answer, {
+        graduationOutcomes,
+      })
+        ? school
+        : undefined,
+    ),
+  );
 }
 
 async function collectWithConcurrency<T, R>(

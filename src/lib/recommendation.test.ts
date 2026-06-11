@@ -112,6 +112,37 @@ describe("rankSchools", () => {
     expect(ranked.map((item) => item.school.id)).toEqual(["science-high"]);
   });
 
+  it("uses the school name as category evidence when live category is generic", () => {
+    const answer: SurveyAnswer = {
+      distancePreference: "balanced",
+      priorities: ["academics", "activities", "environment"],
+      preferredTags: ["과학"],
+      categoryPreference: "과학고",
+      rawResponses: {
+        categoryPreference: "과학고",
+      },
+    };
+
+    const ranked = rankSchools(answer, [
+      makeSchool({
+        id: "generic-science-high",
+        name: "대전동신과학고등학교",
+        category: "고등학교",
+        tags: ["과학", "연구"],
+      }),
+      makeSchool({
+        id: "generic-general-high",
+        name: "대전일반고등학교",
+        category: "고등학교",
+        tags: ["과학"],
+      }),
+    ]);
+
+    expect(ranked.map((item) => item.school.id)).toEqual([
+      "generic-science-high",
+    ]);
+  });
+
   it.each([
     ["일반고", "일반고", "과학고"],
     ["특성화고", "특성화고", "일반고"],
@@ -380,6 +411,37 @@ describe("rankSchools", () => {
     expect(ranked[0].school.id).toBe("near-care");
   });
 
+  it("filters schools outside the selected commute time limit", () => {
+    const answer: SurveyAnswer = {
+      lat: 36.3761,
+      lng: 127.3801,
+      distancePreference: "balanced",
+      priorities: ["academics", "activities", "environment"],
+      preferredTags: [],
+      rawResponses: {
+        commuteTime: "far-ok",
+        commuteMethod: "transit",
+      },
+    };
+
+    const ranked = rankSchools(answer, [
+      makeSchool({
+        id: "near-school",
+        name: "Near High School",
+        lat: 36.37,
+        lng: 127.38,
+      }),
+      makeSchool({
+        id: "gumi-school",
+        name: "Gumi High School",
+        lat: 36.1195,
+        lng: 128.3446,
+      }),
+    ]);
+
+    expect(ranked.map((item) => item.school.id)).toEqual(["near-school"]);
+  });
+
   it("keeps strong far matches visible as expanded candidates", () => {
     const answer: SurveyAnswer = {
       lat: 37.5665,
@@ -392,7 +454,8 @@ describe("rankSchools", () => {
         careerDirection: "science",
         activityPreference: ["project"],
         commuteImportance: 5,
-        commuteTime: "near",
+        commuteTime: "far-ok",
+        commuteMethod: "transit",
       },
     };
 

@@ -2,6 +2,7 @@ import type {
   GraduationOutcomeIndex,
   GraduationOutcomeSummary,
 } from "@/lib/graduation-outcomes";
+import { getCommuteDistanceLimitKm } from "@/lib/commute";
 import type { SurveyAnswer } from "@/lib/types";
 
 export type SurveyCandidateScope = {
@@ -12,15 +13,20 @@ export type SurveyCandidateScope = {
 };
 
 export function getSurveyCandidateScope(
-  distancePreference: SurveyAnswer["distancePreference"],
+  answerOrPreference: SurveyAnswer | SurveyAnswer["distancePreference"],
 ): SurveyCandidateScope {
+  const distancePreference =
+    typeof answerOrPreference === "string"
+      ? answerOrPreference
+      : answerOrPreference.distancePreference;
+
   if (distancePreference === "near") {
-    return {
+    return constrainScopeByCommuteLimit(answerOrPreference, {
       nearbyRadiusKm: 20,
       nearbyLimit: 45,
       nationwideSummaryLimit: 0,
       nationwideSchoolLimit: 0,
-    };
+    });
   }
 
   if (distancePreference === "not-important") {
@@ -32,11 +38,33 @@ export function getSurveyCandidateScope(
     };
   }
 
-  return {
+  return constrainScopeByCommuteLimit(answerOrPreference, {
     nearbyRadiusKm: 20,
     nearbyLimit: 45,
     nationwideSummaryLimit: 80,
     nationwideSchoolLimit: 24,
+  });
+}
+
+function constrainScopeByCommuteLimit(
+  answerOrPreference: SurveyAnswer | SurveyAnswer["distancePreference"],
+  scope: SurveyCandidateScope,
+) {
+  if (typeof answerOrPreference === "string") {
+    return scope;
+  }
+
+  const commuteLimitKm = getCommuteDistanceLimitKm(answerOrPreference);
+
+  if (typeof commuteLimitKm !== "number") {
+    return scope;
+  }
+
+  return {
+    ...scope,
+    nearbyRadiusKm: Math.min(scope.nearbyRadiusKm, commuteLimitKm),
+    nationwideSummaryLimit: 0,
+    nationwideSchoolLimit: 0,
   };
 }
 

@@ -21,6 +21,26 @@ describe("survey candidate scope", () => {
     );
   });
 
+  it("disables nationwide candidates when a finite commute time is selected", () => {
+    const answer: SurveyAnswer = {
+      lat: 36.3761,
+      lng: 127.3801,
+      distancePreference: "balanced",
+      priorities: ["academics", "activities", "environment"],
+      preferredTags: [],
+      rawResponses: {
+        commuteTime: "balanced",
+        commuteMethod: "transit",
+      },
+    };
+
+    const scope = getSurveyCandidateScope(answer);
+
+    expect(scope.nearbyRadiusKm).toBeLessThanOrEqual(18);
+    expect(scope.nationwideSummaryLimit).toBe(0);
+    expect(scope.nationwideSchoolLimit).toBe(0);
+  });
+
   it("selects nationwide college-outcome candidates independent of local distance", () => {
     const answer: SurveyAnswer = {
       distancePreference: "not-important",

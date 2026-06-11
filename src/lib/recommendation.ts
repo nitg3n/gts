@@ -14,6 +14,7 @@ import {
   type GraduationOutcomeIndex,
   type GraduationOutcomeSummary,
 } from "@/lib/graduation-outcomes";
+import { getCommuteDistanceLimitKm } from "@/lib/commute";
 import { getPublicFactItems, getPublicFactValue } from "@/lib/public-facts";
 import { distanceKm } from "@/lib/utils";
 
@@ -383,9 +384,24 @@ function matchesHardConstraints(
       school.category,
       explicitCategoryPreference,
       graduationOutcome,
+      school.name,
     )
   ) {
     return false;
+  }
+
+  if (
+    typeof answer.lat === "number" &&
+    typeof answer.lng === "number"
+  ) {
+    const commuteLimitKm = getCommuteDistanceLimitKm(answer);
+
+    if (
+      typeof commuteLimitKm === "number" &&
+      distanceKm({ lat: answer.lat, lng: answer.lng }, school) > commuteLimitKm
+    ) {
+      return false;
+    }
   }
 
   return true;
@@ -453,6 +469,7 @@ function scorePreferenceFit(
       school.category,
       answer.categoryPreference,
       graduationOutcome,
+      school.name,
     )
       ? 18
       : -8;
@@ -1164,6 +1181,7 @@ function buildEvidence(
         school.category,
         explicitCategoryPreference,
         graduationOutcome,
+        school.name,
       )
         ? "일치"
         : "부분 참고",
@@ -1435,6 +1453,10 @@ function buildReasons(
   if (
     explicitCategoryPreference &&
     (categoryMatchesPreference(school.category, explicitCategoryPreference) ||
+      schoolNameMatchesCategoryPreference(
+        school.name,
+        explicitCategoryPreference,
+      ) ||
       (kessCategory
         ? categoryMatchesPreference(kessCategory, explicitCategoryPreference)
         : false))
@@ -1523,9 +1545,11 @@ function categoryMatchesPreferenceWithOutcome(
   category: string,
   preference: string,
   graduationOutcome: GraduationOutcomeSummary | undefined,
+  schoolName?: string,
 ) {
   return (
     categoryMatchesPreference(category, preference) ||
+    Boolean(schoolName && schoolNameMatchesCategoryPreference(schoolName, preference)) ||
     Boolean(
       graduationOutcome?.specialPurposeType &&
         categoryMatchesPreference(graduationOutcome.specialPurposeType, preference),
@@ -1559,6 +1583,50 @@ function categoryMatchesPreference(category: string, preference: string) {
       preferencePattern.test(normalizedPreference) &&
       categoryPattern.test(normalizedCategory),
   );
+}
+
+function schoolNameMatchesCategoryPreference(
+  schoolName: string,
+  preference: string,
+) {
+  const normalizedName = normalizeCategory(schoolName);
+  const normalizedPreference = normalizeCategory(preference);
+  const giftedSchoolNames = new Set([
+    "서울과학고등학교",
+    "경기과학고등학교",
+    "대구과학고등학교",
+    "대전과학고등학교",
+    "광주과학고등학교",
+    "한국과학영재학교",
+    "세종과학예술영재학교",
+    "인천과학예술영재학교",
+  ]);
+  const nameMatchers: Array<[RegExp, RegExp | ((value: string) => boolean)]> = [
+    [
+      /영재학교?|영재고?/,
+      (value) => /영재/.test(value) || giftedSchoolNames.has(value),
+    ],
+    [/외국어고?|외고/, /외국어고등학교$/],
+    [/국제고?/, /국제고등학교$/],
+    [
+      /과학고?/,
+      (value) => /과학고등학교$/.test(value) && !giftedSchoolNames.has(value),
+    ],
+    [/예술고?|예고/, /예술고등학교$/],
+    [/체육고?|체고/, /체육고등학교$/],
+    [/마이스터고?/, /마이스터고등학교$/],
+    [/특성화고?/, /(공업|상업|디자인|관광|정보|기술|로봇)고등학교$/],
+  ];
+
+  return nameMatchers.some(([preferencePattern, matcher]) => {
+    if (!preferencePattern.test(normalizedPreference)) {
+      return false;
+    }
+
+    return typeof matcher === "function"
+      ? matcher(normalizedName)
+      : matcher.test(normalizedName);
+  });
 }
 
 function normalizeCategory(value: string) {
