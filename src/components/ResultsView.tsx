@@ -119,8 +119,73 @@ export function ResultsView({ responseId }: { responseId: string }) {
   return (
     <div className="apple-page">
       <section className="apple-section">
-        <div className="apple-shell grid gap-6 py-9 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end lg:py-11">
-          <div>
+        <div className="apple-shell py-9 lg:py-11">
+          <div className="apple-panel p-4 sm:p-5">
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(420px,0.95fr)_auto] lg:items-center">
+              <div className="min-w-0">
+                <p className="text-sm font-extrabold text-[var(--brand-primary)]">
+                  추천 요약
+                </p>
+                <p className="mt-2 text-xl font-extrabold leading-tight text-[#1d1d1f]">
+                  {first?.school ? (
+                    <span className="flex min-w-0 items-center gap-2">
+                      <SchoolEmblem school={first.school} size={32} />
+                      <span className="min-w-0 break-keep">
+                        {first.school.name}
+                      </span>
+                    </span>
+                  ) : (
+                    "-"
+                  )}
+                </p>
+                {first ? (
+                  <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-[#6e6e73]">
+                    {getHumanRecommendationReason(first, result.answer)}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+                <HeroMetric label="종합" value={formatScore(first?.score)} />
+                <HeroMetric
+                  label="설문"
+                  value={formatScore(first?.semanticScore)}
+                />
+                <HeroMetric
+                  label="신뢰도"
+                  value={formatConfidence(first?.confidence)}
+                />
+                <HeroMetric label="후보" value={`${recommendations.length}곳`} />
+              </div>
+
+              <div className="flex flex-col gap-3 lg:w-52">
+                <div className="flex flex-wrap gap-2">
+                  {result.answer.categoryPreference ? (
+                    <span className="apple-chip apple-chip-brand px-3 py-1">
+                      {result.answer.categoryPreference}
+                    </span>
+                  ) : null}
+                  <span className="apple-chip apple-chip-brand px-3 py-1">
+                    거리 {distanceLabel(result.answer.distancePreference)}
+                  </span>
+                  {first?.graduationOutcome ? (
+                    <span className="apple-chip apple-chip-brand px-3 py-1">
+                      졸업 후 데이터 반영
+                    </span>
+                  ) : null}
+                </div>
+                <CompareButton
+                  schools={compareSchools}
+                  navigateOnAdd
+                  className="w-fit"
+                >
+                  상위 학교 비교
+                </CompareButton>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 max-w-3xl">
             <p className="apple-eyebrow">{status}</p>
             <h1 className="apple-title mt-2 max-w-2xl text-3xl leading-tight sm:text-4xl">
               지금 조건에서 가장 잘 맞는 학교.
@@ -131,59 +196,6 @@ export function ResultsView({ responseId }: { responseId: string }) {
               </Pill>
               <Pill>거리 {distanceLabel(result.answer.distancePreference)}</Pill>
             </div>
-          </div>
-
-          <div className="apple-panel p-5">
-            <p className="text-sm font-extrabold text-[var(--brand-primary)]">추천 요약</p>
-            <p className="mt-2 text-xl font-extrabold leading-tight text-[#1d1d1f]">
-              {first?.school ? (
-                <span className="flex min-w-0 items-center gap-2">
-                  <SchoolEmblem school={first.school} size={32} />
-                  <span className="min-w-0 break-keep">{first.school.name}</span>
-                </span>
-              ) : (
-                "-"
-              )}
-            </p>
-            {first ? (
-              <p className="mt-3 text-sm font-semibold leading-6 text-[#6e6e73]">
-                {getHumanRecommendationReason(first, result.answer)}
-              </p>
-            ) : null}
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <HeroMetric label="종합" value={formatScore(first?.score)} />
-              <HeroMetric
-                label="설문"
-                value={formatScore(first?.semanticScore)}
-              />
-              <HeroMetric
-                label="신뢰도"
-                value={formatConfidence(first?.confidence)}
-              />
-              <HeroMetric label="후보" value={`${recommendations.length}곳`} />
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {result.answer.categoryPreference ? (
-                <span className="apple-chip apple-chip-brand px-3 py-1">
-                  {result.answer.categoryPreference}
-                </span>
-              ) : null}
-              <span className="apple-chip apple-chip-brand px-3 py-1">
-                거리 {distanceLabel(result.answer.distancePreference)}
-              </span>
-              {first?.graduationOutcome ? (
-                <span className="apple-chip apple-chip-brand px-3 py-1">
-                  졸업 후 데이터 반영
-                </span>
-              ) : null}
-            </div>
-            <CompareButton
-              schools={compareSchools}
-              navigateOnAdd
-              className="mt-5"
-            >
-              상위 학교 비교
-            </CompareButton>
           </div>
         </div>
       </section>
